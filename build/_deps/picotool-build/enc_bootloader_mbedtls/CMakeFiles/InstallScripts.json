@@ -1,0 +1,7 @@
+{
+	"InstallScripts" : 
+	[
+		"/home/johan/Documents/workshop_system/resonator/build/_deps/picotool-build/enc_bootloader_mbedtls/cmake_install.cmake"
+	],
+	"Parallel" : false
+}

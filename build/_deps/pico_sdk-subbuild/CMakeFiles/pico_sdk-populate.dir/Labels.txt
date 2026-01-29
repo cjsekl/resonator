@@ -1,0 +1,14 @@
+# Target labels
+ pico_sdk-populate
+# Source files and their labels
+/home/johan/Documents/workshop_system/resonator/build/_deps/pico_sdk-subbuild/CMakeFiles/pico_sdk-populate
+/home/johan/Documents/workshop_system/resonator/build/_deps/pico_sdk-subbuild/CMakeFiles/pico_sdk-populate.rule
+/home/johan/Documents/workshop_system/resonator/build/_deps/pico_sdk-subbuild/CMakeFiles/pico_sdk-populate-complete.rule
+/home/johan/Documents/workshop_system/resonator/build/_deps/pico_sdk-subbuild/pico_sdk-populate-prefix/src/pico_sdk-populate-stamp/pico_sdk-populate-build.rule
+/home/johan/Documents/workshop_system/resonator/build/_deps/pico_sdk-subbuild/pico_sdk-populate-prefix/src/pico_sdk-populate-stamp/pico_sdk-populate-configure.rule
+/home/johan/Documents/workshop_system/resonator/build/_deps/pico_sdk-subbuild/pico_sdk-populate-prefix/src/pico_sdk-populate-stamp/pico_sdk-populate-download.rule
+/home/johan/Documents/workshop_system/resonator/build/_deps/pico_sdk-subbuild/pico_sdk-populate-prefix/src/pico_sdk-populate-stamp/pico_sdk-populate-install.rule
+/home/johan/Documents/workshop_system/resonator/build/_deps/pico_sdk-subbuild/pico_sdk-populate-prefix/src/pico_sdk-populate-stamp/pico_sdk-populate-mkdir.rule
+/home/johan/Documents/workshop_system/resonator/build/_deps/pico_sdk-subbuild/pico_sdk-populate-prefix/src/pico_sdk-populate-stamp/pico_sdk-populate-patch.rule
+/home/johan/Documents/workshop_system/resonator/build/_deps/pico_sdk-subbuild/pico_sdk-populate-prefix/src/pico_sdk-populate-stamp/pico_sdk-populate-test.rule
+/home/johan/Documents/workshop_system/resonator/build/_deps/pico_sdk-subbuild/pico_sdk-populate-prefix/src/pico_sdk-populate-stamp/pico_sdk-populate-update.rule

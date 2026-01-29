@@ -1,0 +1,459 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Resonator Chord Editor</title>
+    <style>
+        @import url('https://fonts.googleapis.com/css2?family=EB+Garamond:ital,wght@0,400;0,500;1,400&display=swap');
+
+        * { box-sizing: border-box; margin: 0; padding: 0; }
+        body {
+            font-family: 'EB Garamond', 'Georgia', serif;
+            background: #0a0a0a;
+            color: #d8d8d8;
+            min-height: 100vh;
+        }
+        header {
+            display: flex;
+            align-items: baseline;
+            gap: 20px;
+            padding: 32px 40px 24px;
+            border-bottom: 1px solid #222;
+        }
+        header h1 {
+            font-size: 22px;
+            font-weight: 400;
+            letter-spacing: 2px;
+            text-transform: lowercase;
+            flex: 1;
+            color: #e0e0e0;
+        }
+        #status {
+            font-size: 12px;
+            letter-spacing: 1px;
+            text-transform: uppercase;
+            color: #666;
+        }
+        #status.connected { color: #aaa; }
+        #connectBtn {
+            padding: 6px 18px;
+            border: 1px solid #333;
+            border-radius: 0;
+            background: transparent;
+            color: #999;
+            cursor: pointer;
+            font-family: inherit;
+            font-size: 12px;
+            letter-spacing: 1px;
+            text-transform: uppercase;
+            transition: color 0.3s, border-color 0.3s;
+        }
+        #connectBtn:hover { color: #e0e0e0; border-color: #666; }
+        #connectBtn.connected { color: #bbb; border-color: #555; }
+        .no-serial {
+            text-align: center;
+            padding: 40px;
+            color: #666;
+            font-size: 16px;
+            font-style: italic;
+        }
+        main {
+            display: flex;
+            gap: 40px;
+            padding: 32px 40px;
+            max-width: 960px;
+            margin: 0 auto;
+        }
+        section {
+            flex: 1;
+            min-width: 0;
+        }
+        section h2 {
+            font-size: 11px;
+            text-transform: uppercase;
+            letter-spacing: 3px;
+            color: #777;
+            margin-bottom: 16px;
+            font-weight: 400;
+        }
+        .chord-container {
+            min-height: 200px;
+            border: 1px solid #1a1a1a;
+            padding: 4px;
+            display: flex;
+            flex-direction: column;
+            gap: 2px;
+            transition: border-color 0.3s;
+        }
+        .chord-container.dragover {
+            border-color: #444;
+        }
+        .chord-tile {
+            display: flex;
+            align-items: center;
+            padding: 9px 16px;
+            cursor: grab;
+            user-select: none;
+            font-size: 15px;
+            font-weight: 400;
+            transition: opacity 0.2s, background 0.2s;
+            background: #111;
+            border: 1px solid transparent;
+        }
+        .chord-tile:hover { background: #161616; }
+        .chord-tile:active { cursor: grabbing; }
+        .chord-tile.dragging { opacity: 0.2; }
+        .chord-tile .chord-name {
+            flex: 1;
+            letter-spacing: 0.5px;
+        }
+        .chord-tile .chord-desc {
+            font-size: 12px;
+            font-style: italic;
+            color: #666;
+            margin-left: 12px;
+        }
+        .chord-tile .remove-btn {
+            visibility: hidden;
+            margin-left: 12px;
+            width: 20px;
+            height: 20px;
+            border: 1px solid #2a2a2a;
+            background: transparent;
+            color: #555;
+            cursor: pointer;
+            font-size: 13px;
+            line-height: 18px;
+            text-align: center;
+            transition: color 0.2s, border-color 0.2s;
+        }
+        .chord-tile .remove-btn:hover {
+            color: #c8c8c8;
+            border-color: #555;
+        }
+        #progressionList .chord-tile .remove-btn { visibility: visible; }
+        .chord-western { }
+        .chord-tanpura { border-left: 2px solid #222; }
+        .drop-indicator {
+            height: 1px;
+            background: #666;
+            margin: -1px 0;
+        }
+        #sendBtn {
+            margin-top: 16px;
+            padding: 10px 20px;
+            width: 100%;
+            border: 1px solid #333;
+            background: transparent;
+            color: #999;
+            font-family: inherit;
+            font-size: 12px;
+            font-weight: 400;
+            letter-spacing: 2px;
+            text-transform: uppercase;
+            cursor: pointer;
+            transition: color 0.3s, border-color 0.3s;
+        }
+        #sendBtn:hover { color: #e0e0e0; border-color: #666; }
+        #sendBtn:disabled {
+            color: #333;
+            border-color: #1a1a1a;
+            cursor: not-allowed;
+        }
+        .empty-msg {
+            text-align: center;
+            padding: 20px;
+            color: #333;
+            font-size: 13px;
+            font-style: italic;
+        }
+    </style>
+</head>
+<body>
+    <header>
+        <h1>Resonator Chord Editor</h1>
+        <span id="status">Disconnected</span>
+        <button id="connectBtn">Connect USB</button>
+    </header>
+    <div id="noSerial" class="no-serial" style="display:none;">
+        Web Serial API is not supported in this browser. Please use Chrome or Edge.
+    </div>
+    <main id="mainContent">
+        <section>
+            <h2>Available Chords</h2>
+            <div id="chordPalette" class="chord-container"></div>
+        </section>
+        <section>
+            <h2>Active Progression</h2>
+            <div id="progressionList" class="chord-container"></div>
+            <button id="sendBtn" disabled>Send to Device</button>
+        </section>
+    </main>
+    <script>
+        const CHORDS = [
+            { id: 0,  name: "HARMONIC",         desc: "1:2:3:4", family: "western" },
+            { id: 1,  name: "FIFTH",            desc: "1:1, 3:2, 2:1, 3:1", family: "western" },
+            { id: 2,  name: "MAJOR7",           desc: "1:1, 5:4, 3:2, 15:8", family: "western" },
+            { id: 3,  name: "MINOR7",           desc: "1:1, 6:5, 3:2, 9:5", family: "western" },
+            { id: 4,  name: "DIM",              desc: "1:1, 6:5, 36:25, 3:2", family: "western" },
+            { id: 5,  name: "SUS4",             desc: "1:1, 4:3, 3:2, 2:1", family: "western" },
+            { id: 6,  name: "ADD9",             desc: "1:1, 5:4, 3:2, 9:4", family: "western" },
+            { id: 7,  name: "MAJOR10",          desc: "1:1, 5:4, 3:2, 5:2", family: "western" },
+            { id: 8,  name: "SUS2",             desc: "1:1, 9:8, 3:2, 2:1", family: "western" },
+            { id: 9,  name: "MAJOR",            desc: "1:1, 5:4, 3:2, 2:1", family: "western" },
+            { id: 10, name: "MINOR",            desc: "1:1, 6:5, 3:2, 2:1", family: "western" },
+            { id: 11, name: "MAJOR6",           desc: "1:1, 5:4, 3:2, 5:3", family: "western" },
+            { id: 12, name: "DOM7",             desc: "1:1, 5:4, 3:2, 9:5", family: "western" },
+            { id: 13, name: "MIN9",             desc: "1:1, 6:5, 3:2, 9:4", family: "western" },
+            { id: 14, name: "TANPURA PA",       desc: "Sa, Pa, Sa', Sa''", family: "tanpura" },
+            { id: 15, name: "TANPURA MA",       desc: "Sa, Ma, Sa', Sa''", family: "tanpura" },
+            { id: 16, name: "TANPURA NI",       desc: "Sa, Ni, Sa', Sa''", family: "tanpura" },
+            { id: 17, name: "TANPURA NI KOMAL", desc: "Sa, ni, Sa', Sa''", family: "tanpura" },
+        ];
+
+        let port = null;
+        let writer = null;
+        let reader = null;
+        let readBuffer = "";
+        let dragSourceIndex = -1;
+        let dragFromPalette = false;
+        let dragChordId = -1;
+
+        // --- Web Serial ---
+        const connectBtn = document.getElementById("connectBtn");
+        const statusEl = document.getElementById("status");
+        const sendBtn = document.getElementById("sendBtn");
+
+        if (!("serial" in navigator)) {
+            document.getElementById("noSerial").style.display = "block";
+            document.getElementById("mainContent").style.display = "none";
+        }
+
+        connectBtn.addEventListener("click", async () => {
+            if (port) {
+                await disconnect();
+            } else {
+                await connect();
+            }
+        });
+
+        async function connect() {
+            try {
+                port = await navigator.serial.requestPort();
+                await port.open({ baudRate: 115200 });
+
+                writer = port.writable.getWriter();
+                const textDecoder = new TextDecoderStream();
+                port.readable.pipeTo(textDecoder.writable);
+                reader = textDecoder.readable.getReader();
+
+                statusEl.textContent = "Connected";
+                statusEl.className = "connected";
+                connectBtn.textContent = "Disconnect";
+                connectBtn.className = "connected";
+                sendBtn.disabled = false;
+
+                readLoop();
+                sendCommand("GET\n");
+            } catch (e) {
+                console.error("Connection failed:", e);
+            }
+        }
+
+        async function disconnect() {
+            try {
+                if (reader) { await reader.cancel(); reader = null; }
+                if (writer) { writer.releaseLock(); writer = null; }
+                if (port) { await port.close(); port = null; }
+            } catch (e) {
+                console.error("Disconnect error:", e);
+            }
+            statusEl.textContent = "Disconnected";
+            statusEl.className = "";
+            connectBtn.textContent = "Connect USB";
+            connectBtn.className = "";
+            sendBtn.disabled = true;
+        }
+
+        async function readLoop() {
+            try {
+                while (true) {
+                    const { value, done } = await reader.read();
+                    if (done) break;
+                    readBuffer += value;
+                    let lines = readBuffer.split("\n");
+                    readBuffer = lines.pop();
+                    for (const line of lines) {
+                        handleResponse(line.trim());
+                    }
+                }
+            } catch (e) {
+                if (port) console.error("Read error:", e);
+            }
+        }
+
+        function handleResponse(line) {
+            if (line.startsWith("PROG ")) {
+                const ids = line.substring(5).split(",").map(Number);
+                setProgression(ids);
+            } else if (line.startsWith("ERR ")) {
+                console.error("Device error:", line.substring(4));
+            }
+        }
+
+        async function sendCommand(cmd) {
+            if (!writer) return;
+            const encoder = new TextEncoder();
+            await writer.write(encoder.encode(cmd));
+        }
+
+        sendBtn.addEventListener("click", () => {
+            const ids = getProgressionIds();
+            if (ids.length === 0) return;
+            sendCommand("SET " + ids.join(",") + "\n");
+        });
+
+        // --- Chord Palette ---
+        const palette = document.getElementById("chordPalette");
+        const progList = document.getElementById("progressionList");
+
+        function createChordTile(chordId, showRemove) {
+            const chord = CHORDS[chordId];
+            const tile = document.createElement("div");
+            tile.className = `chord-tile chord-${chord.family}`;
+            tile.draggable = true;
+            tile.dataset.chordId = chordId;
+
+            tile.innerHTML = `
+                <span class="chord-name">${chord.name}</span>
+                <span class="chord-desc">${chord.desc}</span>
+                <button class="remove-btn">&times;</button>
+            `;
+
+            tile.addEventListener("dragstart", (e) => {
+                tile.classList.add("dragging");
+                dragChordId = chordId;
+                dragFromPalette = !showRemove;
+                if (!dragFromPalette) {
+                    dragSourceIndex = [...progList.children].filter(c => !c.classList.contains("drop-indicator")).indexOf(tile);
+                }
+                e.dataTransfer.effectAllowed = dragFromPalette ? "copy" : "move";
+                e.dataTransfer.setData("text/plain", String(chordId));
+            });
+
+            tile.addEventListener("dragend", () => {
+                tile.classList.remove("dragging");
+                clearDropIndicators();
+                dragSourceIndex = -1;
+                dragChordId = -1;
+            });
+
+            tile.querySelector(".remove-btn").addEventListener("click", () => {
+                if (tile.parentElement === progList) {
+                    tile.remove();
+                }
+            });
+
+            return tile;
+        }
+
+        // Build palette
+        CHORDS.forEach(chord => {
+            palette.appendChild(createChordTile(chord.id, false));
+        });
+
+        // --- Drop handling ---
+        function getDropIndex(container, y) {
+            const tiles = [...container.children].filter(c => !c.classList.contains("drop-indicator") && !c.classList.contains("dragging"));
+            for (let i = 0; i < tiles.length; i++) {
+                const rect = tiles[i].getBoundingClientRect();
+                if (y < rect.top + rect.height / 2) return i;
+            }
+            return tiles.length;
+        }
+
+        function clearDropIndicators() {
+            document.querySelectorAll(".drop-indicator").forEach(el => el.remove());
+            progList.classList.remove("dragover");
+        }
+
+        progList.addEventListener("dragover", (e) => {
+            e.preventDefault();
+            e.dataTransfer.dropEffect = dragFromPalette ? "copy" : "move";
+            progList.classList.add("dragover");
+
+            clearDropIndicators();
+            const idx = getDropIndex(progList, e.clientY);
+            const indicator = document.createElement("div");
+            indicator.className = "drop-indicator";
+            const tiles = [...progList.children].filter(c => !c.classList.contains("dragging"));
+            if (tiles[idx]) {
+                progList.insertBefore(indicator, tiles[idx]);
+            } else {
+                progList.appendChild(indicator);
+            }
+        });
+
+        progList.addEventListener("dragleave", (e) => {
+            if (!progList.contains(e.relatedTarget)) {
+                clearDropIndicators();
+            }
+        });
+
+        progList.addEventListener("drop", (e) => {
+            e.preventDefault();
+            clearDropIndicators();
+
+            const chordId = parseInt(e.dataTransfer.getData("text/plain"));
+            const dropIdx = getDropIndex(progList, e.clientY);
+
+            if (dragFromPalette) {
+                // Copy from palette
+                const tile = createChordTile(chordId, true);
+                const tiles = [...progList.children].filter(c => !c.classList.contains("drop-indicator"));
+                if (tiles[dropIdx]) {
+                    progList.insertBefore(tile, tiles[dropIdx]);
+                } else {
+                    progList.appendChild(tile);
+                }
+            } else {
+                // Reorder within progression
+                const tiles = [...progList.children].filter(c => !c.classList.contains("drop-indicator") && !c.classList.contains("dragging"));
+                const dragged = progList.querySelector(".dragging");
+                if (dragged) {
+                    dragged.classList.remove("dragging");
+                    let adjustedIdx = dropIdx;
+                    if (dragSourceIndex < dropIdx) adjustedIdx--;
+                    dragged.remove();
+                    const currentTiles = [...progList.children];
+                    if (currentTiles[adjustedIdx]) {
+                        progList.insertBefore(dragged, currentTiles[adjustedIdx]);
+                    } else {
+                        progList.appendChild(dragged);
+                    }
+                }
+            }
+        });
+
+        // --- State helpers ---
+        function getProgressionIds() {
+            return [...progList.children]
+                .filter(c => c.classList.contains("chord-tile"))
+                .map(tile => parseInt(tile.dataset.chordId));
+        }
+
+        function setProgression(ids) {
+            progList.innerHTML = "";
+            ids.forEach(id => {
+                if (id >= 0 && id < CHORDS.length) {
+                    progList.appendChild(createChordTile(id, true));
+                }
+            });
+        }
+
+        // Initialize with default (all chords)
+        setProgression(CHORDS.map(c => c.id));
+    </script>
+</body>
+</html>

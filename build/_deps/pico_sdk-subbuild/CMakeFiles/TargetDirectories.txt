@@ -1,0 +1,3 @@
+/home/johan/Documents/workshop_system/resonator/build/_deps/pico_sdk-subbuild/CMakeFiles/pico_sdk-populate.dir
+/home/johan/Documents/workshop_system/resonator/build/_deps/pico_sdk-subbuild/CMakeFiles/edit_cache.dir
+/home/johan/Documents/workshop_system/resonator/build/_deps/pico_sdk-subbuild/CMakeFiles/rebuild_cache.dir
