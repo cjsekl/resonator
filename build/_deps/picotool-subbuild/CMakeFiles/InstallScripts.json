@@ -1,7 +1,0 @@
-{
-	"InstallScripts" : 
-	[
-		"/home/johan/Documents/workshop_system/resonator/build/_deps/picotool-subbuild/cmake_install.cmake"
-	],
-	"Parallel" : false
-}
