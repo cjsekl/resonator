@@ -4,6 +4,7 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Resonator Chord Editor</title>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/p5.js/1.9.0/p5.min.js"></script>
     <style>
         @import url('https://fonts.googleapis.com/css2?family=EB+Garamond:ital,wght@0,400;0,500;1,400&display=swap');
 
@@ -14,12 +15,27 @@
             color: #d8d8d8;
             min-height: 100vh;
         }
+        #canvas-container {
+            position: fixed;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            z-index: 0;
+        }
+        #canvas-container canvas {
+            display: block;
+        }
         header {
+            position: relative;
+            z-index: 10;
             display: flex;
             align-items: baseline;
             gap: 20px;
             padding: 32px 40px 24px;
             border-bottom: 1px solid #222;
+            background: rgba(10, 10, 10, 0.85);
+            backdrop-filter: blur(10px);
         }
         header h1 {
             font-size: 22px;
@@ -36,8 +52,8 @@
             color: #666;
         }
         #status.connected { color: #aaa; }
-        #connectBtn {
-            padding: 6px 18px;
+        #connectBtn, #settings-btn {
+            padding: 8px 14px;
             border: 1px solid #333;
             border-radius: 0;
             background: transparent;
@@ -49,9 +65,11 @@
             text-transform: uppercase;
             transition: color 0.3s, border-color 0.3s;
         }
-        #connectBtn:hover { color: #e0e0e0; border-color: #666; }
+        #connectBtn:hover, #settings-btn:hover { color: #e0e0e0; border-color: #666; }
         #connectBtn.connected { color: #bbb; border-color: #555; }
         .no-serial {
+            position: relative;
+            z-index: 10;
             text-align: center;
             padding: 40px;
             color: #666;
@@ -59,15 +77,16 @@
             font-style: italic;
         }
         main {
+            position: relative;
+            z-index: 10;
             display: flex;
-            gap: 40px;
+            justify-content: center;
+            align-items: flex-start;
+            gap: 80px;
             padding: 32px 40px;
-            max-width: 960px;
-            margin: 0 auto;
         }
         section {
-            flex: 1;
-            min-width: 0;
+            flex: 0 0 auto;
         }
         section h2 {
             font-size: 11px;
@@ -79,12 +98,16 @@
         }
         .chord-container {
             min-height: 200px;
+            min-width: 258px;
             border: 1px solid #1a1a1a;
             padding: 4px;
-            display: flex;
+            display: inline-flex;
             flex-direction: column;
             gap: 2px;
             transition: border-color 0.3s;
+            background: rgba(10, 10, 10, 0.1);
+            backdrop-filter: blur(0.5px);
+            width: fit-content;
         }
         .chord-container.dragover {
             border-color: #444;
@@ -98,10 +121,11 @@
             font-size: 15px;
             font-weight: 400;
             transition: opacity 0.2s, background 0.2s;
-            background: #111;
+            background: rgba(17, 17, 17, 0.5);
             border: 1px solid transparent;
+            width: 250px;
         }
-        .chord-tile:hover { background: #161616; }
+        .chord-tile:hover { background: rgba(22, 22, 22, 0.65); }
         .chord-tile:active { cursor: grabbing; }
         .chord-tile.dragging { opacity: 0.2; }
         .chord-tile .chord-name {
@@ -133,6 +157,26 @@
             border-color: #555;
         }
         #progressionList .chord-tile .remove-btn { visibility: visible; }
+        .chord-tile .info-btn {
+            margin-left: 8px;
+            width: 20px;
+            height: 20px;
+            border: 1px solid #2a2a2a;
+            background: transparent;
+            color: #555;
+            cursor: pointer;
+            font-size: 11px;
+            line-height: 18px;
+            text-align: center;
+            border-radius: 50%;
+            transition: color 0.2s, border-color 0.2s;
+            font-family: Georgia, serif;
+            font-style: italic;
+        }
+        .chord-tile .info-btn:hover {
+            color: #c8c8c8;
+            border-color: #555;
+        }
         .chord-western { }
         .chord-tanpura { border-left: 2px solid #222; }
         .drop-indicator {
@@ -140,23 +184,27 @@
             background: #666;
             margin: -1px 0;
         }
-        #sendBtn {
+        .button-row {
+            display: flex;
+            gap: 8px;
             margin-top: 16px;
-            padding: 10px 20px;
-            width: 100%;
+        }
+        .button-row button {
+            flex: 1;
+            padding: 10px 16px;
             border: 1px solid #333;
             background: transparent;
             color: #999;
             font-family: inherit;
-            font-size: 12px;
+            font-size: 11px;
             font-weight: 400;
-            letter-spacing: 2px;
+            letter-spacing: 1px;
             text-transform: uppercase;
             cursor: pointer;
             transition: color 0.3s, border-color 0.3s;
         }
-        #sendBtn:hover { color: #e0e0e0; border-color: #666; }
-        #sendBtn:disabled {
+        .button-row button:hover { color: #e0e0e0; border-color: #666; }
+        .button-row button:disabled {
             color: #333;
             border-color: #1a1a1a;
             cursor: not-allowed;
@@ -168,14 +216,401 @@
             font-size: 13px;
             font-style: italic;
         }
+
+        /* Settings Modal */
+        #settings-modal {
+            display: none;
+            position: fixed;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            z-index: 100;
+            background: rgba(0, 0, 0, 0.7);
+            backdrop-filter: blur(4px);
+            justify-content: center;
+            align-items: center;
+        }
+        #settings-modal.visible {
+            display: flex;
+        }
+        .settings-dialog {
+            background: #111;
+            border: 1px solid #333;
+            border-radius: 8px;
+            padding: 24px 32px;
+            min-width: 280px;
+        }
+        .settings-dialog h3 {
+            margin: 0 0 20px 0;
+            font-size: 16px;
+            font-weight: 400;
+            color: #e0e0e0;
+        }
+        .settings-row {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            padding: 12px 0;
+            border-bottom: 1px solid #222;
+        }
+        .settings-row span {
+            font-size: 14px;
+            color: #aaa;
+        }
+        #theme-btn {
+            background: transparent;
+            border: 1px solid #333;
+            border-radius: 4px;
+            padding: 6px 12px;
+            font-size: 16px;
+            color: #999;
+            cursor: pointer;
+            transition: all 0.2s;
+        }
+        #theme-btn:hover {
+            color: #e0e0e0;
+            border-color: #666;
+        }
+        .toggle {
+            position: relative;
+            width: 44px;
+            height: 24px;
+        }
+        .toggle input {
+            opacity: 0;
+            width: 0;
+            height: 0;
+        }
+        .toggle-slider {
+            position: absolute;
+            cursor: pointer;
+            top: 0;
+            left: 0;
+            right: 0;
+            bottom: 0;
+            background: #333;
+            border-radius: 24px;
+            transition: 0.2s;
+        }
+        .toggle-slider:before {
+            position: absolute;
+            content: "";
+            height: 18px;
+            width: 18px;
+            left: 3px;
+            bottom: 3px;
+            background: #888;
+            border-radius: 50%;
+            transition: 0.2s;
+        }
+        .toggle input:checked + .toggle-slider {
+            background: #444;
+        }
+        .toggle input:checked + .toggle-slider:before {
+            transform: translateX(20px);
+            background: #e0e0e0;
+        }
+        .settings-close {
+            display: block;
+            width: 100%;
+            margin-top: 20px;
+            padding: 10px;
+            background: transparent;
+            border: 1px solid #333;
+            color: #888;
+            font-family: inherit;
+            font-size: 12px;
+            text-transform: uppercase;
+            letter-spacing: 1px;
+            cursor: pointer;
+            transition: color 0.2s, border-color 0.2s;
+        }
+        .settings-close:hover {
+            color: #e0e0e0;
+            border-color: #666;
+        }
+
+        /* Light mode */
+        body.light-mode {
+            background: #fafafa;
+            color: #222;
+        }
+        body.light-mode header {
+            background: rgba(250, 250, 250, 0.9);
+            border-bottom-color: #ddd;
+        }
+        body.light-mode header h1 {
+            color: #222;
+        }
+        body.light-mode #status {
+            color: #888;
+        }
+        body.light-mode #status.connected {
+            color: #444;
+        }
+        body.light-mode #connectBtn {
+            border-color: #ccc;
+            color: #666;
+        }
+        body.light-mode #connectBtn:hover {
+            color: #222;
+            border-color: #999;
+        }
+        body.light-mode section h2 {
+            color: #888;
+        }
+        body.light-mode .chord-container {
+            background: rgba(250, 250, 250, 0.1);
+            border-color: #ddd;
+        }
+        body.light-mode .chord-tile {
+            background: rgba(255, 255, 255, 0.5);
+            color: #333;
+        }
+        body.light-mode .chord-tile:hover {
+            background: rgba(255, 255, 255, 0.65);
+        }
+        body.light-mode .chord-tile .chord-desc {
+            color: #999;
+        }
+        body.light-mode .chord-tile .remove-btn,
+        body.light-mode .chord-tile .info-btn {
+            border-color: #ddd;
+            color: #999;
+        }
+        body.light-mode .chord-tile .info-btn:hover {
+            color: #333;
+            border-color: #999;
+        }
+        body.light-mode .chord-tanpura {
+            border-left-color: #ccc;
+        }
+        body.light-mode .button-row button {
+            border-color: #ccc;
+            color: #666;
+        }
+        body.light-mode .button-row button:hover {
+            color: #222;
+            border-color: #999;
+        }
+        body.light-mode .button-row button:disabled {
+            color: #ccc;
+            border-color: #ddd;
+        }
+        body.light-mode #connectBtn,
+        body.light-mode #settings-btn {
+            border-color: #ccc;
+            color: #666;
+        }
+        body.light-mode #connectBtn:hover,
+        body.light-mode #settings-btn:hover {
+            color: #222;
+            border-color: #999;
+        }
+        body.light-mode .settings-dialog {
+            background: #fff;
+            border-color: #ddd;
+        }
+        body.light-mode .settings-dialog h3 {
+            color: #222;
+        }
+        body.light-mode .settings-row {
+            border-bottom-color: #eee;
+        }
+        body.light-mode .settings-row span {
+            color: #666;
+        }
+        body.light-mode #theme-btn {
+            border-color: #ccc;
+            color: #666;
+        }
+        body.light-mode #theme-btn:hover {
+            color: #222;
+            border-color: #999;
+        }
+        body.light-mode .toggle-slider {
+            background: #ddd;
+        }
+        body.light-mode .toggle-slider:before {
+            background: #999;
+        }
+        body.light-mode .toggle input:checked + .toggle-slider {
+            background: #ccc;
+        }
+        body.light-mode .toggle input:checked + .toggle-slider:before {
+            background: #333;
+        }
+        body.light-mode .settings-close {
+            border-color: #ccc;
+            color: #666;
+        }
+        body.light-mode .settings-close:hover {
+            color: #222;
+            border-color: #999;
+        }
+
+        /* Piano Modal */
+        #piano-modal {
+            display: none;
+            position: fixed;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            z-index: 100;
+            background: rgba(0, 0, 0, 0.7);
+            backdrop-filter: blur(4px);
+            justify-content: center;
+            align-items: center;
+        }
+        #piano-modal.visible {
+            display: flex;
+        }
+        .piano-dialog {
+            background: #111;
+            border: 1px solid #333;
+            border-radius: 8px;
+            padding: 24px 32px;
+            max-width: 580px;
+            width: 90%;
+        }
+        .piano-dialog h3 {
+            margin: 0 0 4px 0;
+            font-size: 18px;
+            font-weight: 400;
+            color: #e0e0e0;
+        }
+        .piano-dialog .chord-intervals {
+            font-size: 13px;
+            color: #888;
+            margin-bottom: 20px;
+            font-style: italic;
+        }
+        .piano-container {
+            position: relative;
+            height: 120px;
+            margin-bottom: 16px;
+        }
+        .piano-white-keys {
+            display: flex;
+            height: 100%;
+        }
+        .white-key {
+            flex: 1;
+            background: #f5f5f5;
+            border: 1px solid #999;
+            border-radius: 0 0 4px 4px;
+            margin-right: 2px;
+            position: relative;
+            transition: background 0.15s;
+        }
+        .white-key:last-child {
+            margin-right: 0;
+        }
+        .white-key.active {
+            background: #4a9eff;
+        }
+        .white-key.root {
+            background: #ff6b6b;
+        }
+        .piano-black-keys {
+            position: absolute;
+            top: 0;
+            left: 0;
+            right: 0;
+            height: 60%;
+            display: flex;
+            pointer-events: none;
+        }
+        .black-key-slot {
+            flex: 1;
+            position: relative;
+            margin-right: 2px;
+        }
+        .black-key-slot:last-child {
+            margin-right: 0;
+        }
+        .black-key {
+            position: absolute;
+            right: -30%;
+            width: 60%;
+            height: 100%;
+            background: #222;
+            border-radius: 0 0 3px 3px;
+            z-index: 1;
+            transition: background 0.15s;
+        }
+        .black-key.active {
+            background: #4a9eff;
+        }
+        .black-key.root {
+            background: #ff6b6b;
+        }
+        .piano-close {
+            display: block;
+            width: 100%;
+            padding: 10px;
+            background: transparent;
+            border: 1px solid #333;
+            color: #888;
+            font-family: inherit;
+            font-size: 12px;
+            text-transform: uppercase;
+            letter-spacing: 1px;
+            cursor: pointer;
+            transition: color 0.2s, border-color 0.2s;
+        }
+        .piano-close:hover {
+            color: #e0e0e0;
+            border-color: #666;
+        }
+        body.light-mode .piano-dialog {
+            background: #fff;
+            border-color: #ddd;
+        }
+        body.light-mode .piano-dialog h3 {
+            color: #222;
+        }
+        body.light-mode .piano-dialog .chord-intervals {
+            color: #888;
+        }
+        body.light-mode .piano-close {
+            border-color: #ccc;
+            color: #666;
+        }
+        body.light-mode .piano-close:hover {
+            color: #222;
+            border-color: #999;
+        }
     </style>
 </head>
 <body>
+    <div id="canvas-container"></div>
     <header>
         <h1>Resonator Chord Editor</h1>
+        <button id="settings-btn">⚙</button>
         <span id="status">Disconnected</span>
         <button id="connectBtn">Connect USB</button>
     </header>
+
+    <div id="settings-modal">
+        <div class="settings-dialog">
+            <h3>Settings</h3>
+            <div class="settings-row">
+                <span>Theme</span>
+                <button id="theme-btn">☽</button>
+            </div>
+            <div class="settings-row">
+                <span>Animations</span>
+                <label class="toggle">
+                    <input type="checkbox" id="animations-toggle" checked>
+                    <span class="toggle-slider"></span>
+                </label>
+            </div>
+            <button class="settings-close" id="settings-close">Close</button>
+        </div>
+    </div>
     <div id="noSerial" class="no-serial" style="display:none;">
         Web Serial API is not supported in this browser. Please use Chrome or Edge.
     </div>
@@ -187,25 +622,47 @@
         <section>
             <h2>Active Progression</h2>
             <div id="progressionList" class="chord-container"></div>
-            <button id="sendBtn" disabled>Send to Device</button>
+            <div class="button-row">
+                <button id="sendBtn" disabled>Send to Device</button>
+                <button id="clearBtn">Clear All</button>
+            </div>
         </section>
     </main>
+
+    <div id="piano-modal">
+        <div class="piano-dialog">
+            <h3 id="piano-chord-name">MAJOR</h3>
+            <div class="chord-intervals" id="piano-chord-desc">1, 3, 5, 8</div>
+            <div class="piano-container">
+                <div class="piano-white-keys" id="white-keys"></div>
+                <div class="piano-black-keys" id="black-keys"></div>
+            </div>
+            <button class="piano-close" id="piano-close">Close</button>
+        </div>
+    </div>
+
+
     <script>
         const CHORDS = [
-            { id: 0,  name: "HARMONIC",         desc: "1:2:3:4", family: "western" },
-            { id: 1,  name: "FIFTH",            desc: "1:1, 3:2, 2:1, 3:1", family: "western" },
-            { id: 2,  name: "MAJOR7",           desc: "1:1, 5:4, 3:2, 15:8", family: "western" },
-            { id: 3,  name: "MINOR7",           desc: "1:1, 6:5, 3:2, 9:5", family: "western" },
-            { id: 4,  name: "DIM",              desc: "1:1, 6:5, 36:25, 3:2", family: "western" },
-            { id: 5,  name: "SUS4",             desc: "1:1, 4:3, 3:2, 2:1", family: "western" },
-            { id: 6,  name: "ADD9",             desc: "1:1, 5:4, 3:2, 9:4", family: "western" },
-            { id: 7,  name: "MAJOR10",          desc: "1:1, 5:4, 3:2, 5:2", family: "western" },
-            { id: 8,  name: "SUS2",             desc: "1:1, 9:8, 3:2, 2:1", family: "western" },
-            { id: 9,  name: "MAJOR",            desc: "1:1, 5:4, 3:2, 2:1", family: "western" },
-            { id: 10, name: "MINOR",            desc: "1:1, 6:5, 3:2, 2:1", family: "western" },
-            { id: 11, name: "MAJOR6",           desc: "1:1, 5:4, 3:2, 5:3", family: "western" },
-            { id: 12, name: "DOM7",             desc: "1:1, 5:4, 3:2, 9:5", family: "western" },
-            { id: 13, name: "MIN9",             desc: "1:1, 6:5, 3:2, 9:4", family: "western" },
+            // Fundamentals
+            { id: 0,  name: "HARMONIC",         desc: "1, 8, 12, 15", family: "western" },
+            { id: 1,  name: "FIFTH",            desc: "1, 5, 8, 12", family: "western" },
+            // Major family
+            { id: 9,  name: "MAJOR",            desc: "1, 3, 5, 8", family: "western" },
+            { id: 11, name: "MAJOR6",           desc: "1, 3, 5, 6", family: "western" },
+            { id: 2,  name: "MAJOR7",           desc: "1, 3, 5, 7", family: "western" },
+            { id: 12, name: "DOM7",             desc: "1, 3, 5, b7", family: "western" },
+            { id: 6,  name: "ADD9",             desc: "1, 3, 5, 9", family: "western" },
+            { id: 7,  name: "MAJOR10",          desc: "1, 3, 5, 10", family: "western" },
+            // Minor family
+            { id: 10, name: "MINOR",            desc: "1, b3, 5, 8", family: "western" },
+            { id: 3,  name: "MINOR7",           desc: "1, b3, 5, b7", family: "western" },
+            { id: 13, name: "MIN9",             desc: "1, b3, 5, 9", family: "western" },
+            // Other
+            { id: 4,  name: "DIM",              desc: "1, b3, b5, 5", family: "western" },
+            { id: 8,  name: "SUS2",             desc: "1, 2, 5, 8", family: "western" },
+            { id: 5,  name: "SUS4",             desc: "1, 4, 5, 8", family: "western" },
+            // Tanpura
             { id: 14, name: "TANPURA PA",       desc: "Sa, Pa, Sa', Sa''", family: "tanpura" },
             { id: 15, name: "TANPURA MA",       desc: "Sa, Ma, Sa', Sa''", family: "tanpura" },
             { id: 16, name: "TANPURA NI",       desc: "Sa, Ni, Sa', Sa''", family: "tanpura" },
@@ -308,10 +765,99 @@
             await writer.write(encoder.encode(cmd));
         }
 
-        sendBtn.addEventListener("click", () => {
+        sendBtn.addEventListener("click", (e) => {
             const ids = getProgressionIds();
             if (ids.length === 0) return;
             sendCommand("SET " + ids.join(",") + "\n");
+
+            // Trigger resonance wave when sending to device
+            if (window.triggerResonance) {
+                const rect = sendBtn.getBoundingClientRect();
+                window.triggerResonance(rect.left + rect.width / 2, rect.top + rect.height / 2);
+            }
+        });
+
+        document.getElementById('clearBtn').addEventListener('click', () => {
+            progList.innerHTML = '';
+        });
+
+        // --- Piano Modal ---
+        const pianoModal = document.getElementById("piano-modal");
+        const pianoChordName = document.getElementById("piano-chord-name");
+        const pianoChordDesc = document.getElementById("piano-chord-desc");
+        const whiteKeysContainer = document.getElementById("white-keys");
+        const blackKeysContainer = document.getElementById("black-keys");
+
+        // Piano spans C4 to C6 (middle C to 2 octaves up)
+        // White keys: C D E F G A B (repeated)
+        const whiteNotes = ['C4','D4','E4','F4','G4','A4','B4','C5','D5','E5','F5','G5','A5','B5','C6'];
+        const blackNotes = ['C#4','D#4',null,'F#4','G#4','A#4',null,'C#5','D#5',null,'F#5','G#5','A#5',null,null];
+        const noteLabels = ['C','D','E','F','G','A','B','C','D','E','F','G','A','B','C'];
+
+        // Build piano keys
+        whiteNotes.forEach((note, i) => {
+            const key = document.createElement('div');
+            key.className = 'white-key';
+            key.dataset.note = note;
+            whiteKeysContainer.appendChild(key);
+        });
+
+        blackNotes.forEach((note, i) => {
+            const slot = document.createElement('div');
+            slot.className = 'black-key-slot';
+            if (note) {
+                const key = document.createElement('div');
+                key.className = 'black-key';
+                key.dataset.note = note;
+                slot.appendChild(key);
+            }
+            blackKeysContainer.appendChild(slot);
+        });
+
+        // Interval to note mapping (root = C4)
+        const intervalToNote = {
+            '1': 'C4', '2': 'D4', 'b3': 'D#4', '3': 'E4', '4': 'F4',
+            'b5': 'F#4', '5': 'G4', '6': 'A4', 'b7': 'A#4', '7': 'B4',
+            '8': 'C5', '9': 'D5', '10': 'E5', '11': 'F5', '12': 'G5',
+            '13': 'A5', '14': 'B5', '15': 'C6',
+            // Tanpura swaras
+            'Sa': 'C4', 'Re': 'D4', 'Ga': 'E4', 'Ma': 'F4', 'Pa': 'G4',
+            'Dha': 'A4', 'Ni': 'B4', 'ni': 'A#4',
+            "Sa'": 'C5', "Sa''": 'C6'
+        };
+
+        function showPianoModal(chordId) {
+            const chord = CHORDS.find(c => c.id === chordId);
+            pianoChordName.textContent = chord.name;
+            pianoChordDesc.textContent = chord.desc;
+
+            // Clear all highlights
+            document.querySelectorAll('.white-key, .black-key').forEach(k => {
+                k.classList.remove('active', 'root');
+            });
+
+            // Parse intervals and highlight keys
+            const intervals = chord.desc.split(',').map(s => s.trim());
+            intervals.forEach((interval, idx) => {
+                const note = intervalToNote[interval];
+                if (note) {
+                    const key = document.querySelector(`[data-note="${note}"]`);
+                    if (key) {
+                        key.classList.add(idx === 0 ? 'root' : 'active');
+                    }
+                }
+            });
+
+            pianoModal.classList.add('visible');
+        }
+
+        function hidePianoModal() {
+            pianoModal.classList.remove('visible');
+        }
+
+        document.getElementById('piano-close').addEventListener('click', hidePianoModal);
+        pianoModal.addEventListener('click', (e) => {
+            if (e.target === pianoModal) hidePianoModal();
         });
 
         // --- Chord Palette ---
@@ -319,7 +865,7 @@
         const progList = document.getElementById("progressionList");
 
         function createChordTile(chordId, showRemove) {
-            const chord = CHORDS[chordId];
+            const chord = CHORDS.find(c => c.id === chordId);
             const tile = document.createElement("div");
             tile.className = `chord-tile chord-${chord.family}`;
             tile.draggable = true;
@@ -327,7 +873,7 @@
 
             tile.innerHTML = `
                 <span class="chord-name">${chord.name}</span>
-                <span class="chord-desc">${chord.desc}</span>
+                <button class="info-btn">i</button>
                 <button class="remove-btn">&times;</button>
             `;
 
@@ -349,10 +895,16 @@
                 dragChordId = -1;
             });
 
-            tile.querySelector(".remove-btn").addEventListener("click", () => {
+            tile.querySelector(".remove-btn").addEventListener("click", (e) => {
+                e.stopPropagation();
                 if (tile.parentElement === progList) {
                     tile.remove();
                 }
+            });
+
+            tile.querySelector(".info-btn").addEventListener("click", (e) => {
+                e.stopPropagation();
+                showPianoModal(chordId);
             });
 
             return tile;
@@ -408,6 +960,12 @@
             const chordId = parseInt(e.dataTransfer.getData("text/plain"));
             const dropIdx = getDropIndex(progList, e.clientY);
 
+            // Randomize viz params and trigger string resonance on drop
+            randomizeVizParams();
+            if (window.triggerResonance) {
+                window.triggerResonance(e.clientX, e.clientY);
+            }
+
             if (dragFromPalette) {
                 // Copy from palette
                 const tile = createChordTile(chordId, true);
@@ -446,7 +1004,7 @@
         function setProgression(ids) {
             progList.innerHTML = "";
             ids.forEach(id => {
-                if (id >= 0 && id < CHORDS.length) {
+                if (CHORDS.find(c => c.id === id)) {
                     progList.appendChild(createChordTile(id, true));
                 }
             });
@@ -454,6 +1012,195 @@
 
         // Initialize with default (all chords)
         setProgression(CHORDS.map(c => c.id));
+
+        // ========================================
+        // p5.js String Resonance Visualization
+        // ========================================
+        let time = 0;
+        const NUM_LINES = 120;
+        let lines = [];
+        let trailLines = [];
+
+        // Visualization parameters
+        let currentNoiseScale = 0.5;
+        let currentDriftAmount = 150;
+        let currentSpeed = 0.01;
+        let currentDecay = 0.98;
+        let isDarkMode = true;
+
+        // Randomize visualization parameters
+        function randomizeVizParams() {
+            currentDriftAmount = 50 + Math.random() * 350;  // 50-400
+            currentSpeed = 0.002 + Math.random() * 0.048;   // 0.002-0.05
+            currentNoiseScale = 0.1 + Math.random() * 1.9;  // 0.1-2.0
+            currentDecay = 0.9 + Math.random() * 0.095;     // 0.9-0.995
+        }
+
+        // Settings modal
+        const settingsModal = document.getElementById('settings-modal');
+        document.getElementById('settings-btn').addEventListener('click', () => {
+            settingsModal.classList.add('visible');
+        });
+        document.getElementById('settings-close').addEventListener('click', () => {
+            settingsModal.classList.remove('visible');
+        });
+        settingsModal.addEventListener('click', (e) => {
+            if (e.target === settingsModal) settingsModal.classList.remove('visible');
+        });
+
+        // Theme toggle
+        document.getElementById('theme-btn').addEventListener('click', () => {
+            isDarkMode = !isDarkMode;
+            document.body.classList.toggle('light-mode', !isDarkMode);
+            document.getElementById('theme-btn').textContent = isDarkMode ? '☽' : '☀';
+        });
+
+        // Animations toggle
+        let animationsEnabled = true;
+        document.getElementById('animations-toggle').addEventListener('change', (e) => {
+            animationsEnabled = e.target.checked;
+            if (animationsEnabled) {
+                loop();
+            } else {
+                noLoop();
+            }
+        });
+
+        class DriftLine {
+            constructor(x, index) {
+                this.baseX = x;
+                this.index = index;
+                this.excitation = 0;
+                this.exciteX = 0;
+                this.exciteY = 0;
+                this.lastPoints = [];
+            }
+
+            excite(amount, x, y) {
+                this.excitation = min(1, this.excitation + amount);
+                this.exciteX = x;
+                this.exciteY = y;
+            }
+
+            update() {
+                if (this.excitation > 0.15 && this.lastPoints.length > 0 && frameCount % 3 === 0) {
+                    trailLines.push(new TrailLine(this.lastPoints.slice(), this.excitation * 0.7));
+                }
+                this.excitation *= currentDecay;
+                if (this.excitation < 0.001) this.excitation = 0;
+            }
+
+            draw() {
+                let alpha = map(this.excitation, 0, 1, 0.2, 0.8);
+                let weight = map(this.excitation, 0, 1, 0.5, 1.5);
+
+                let brightness = isDarkMode ? 70 : 30;
+                stroke(0, 0, brightness, alpha);
+                strokeWeight(weight);
+                noFill();
+
+                this.lastPoints = [];
+
+                beginShape();
+                for (let y = 0; y <= height; y += 3) {
+                    let drift = 0;
+                    if (this.excitation > 0) {
+                        let distX = abs(this.baseX - this.exciteX);
+                        let distY = abs(y - this.exciteY);
+                        let totalDist = sqrt(distX * distX + distY * distY);
+
+                        let proximity = exp(-totalDist * 0.003);
+
+                        let noiseVal = noise(
+                            this.baseX * 0.002 * currentNoiseScale,
+                            y * 0.002 * currentNoiseScale,
+                            time
+                        );
+
+                        let mapped = sin(noiseVal * TWO_PI * 2);
+                        drift = mapped * currentDriftAmount * this.excitation * proximity;
+                    }
+                    let px = this.baseX + drift;
+                    vertex(px, y);
+                    this.lastPoints.push({x: px, y: y});
+                }
+                endShape();
+            }
+        }
+
+        class TrailLine {
+            constructor(points, initialAlpha) {
+                this.points = points;
+                this.alpha = initialAlpha;
+            }
+
+            update() {
+                this.alpha *= 0.94;
+                return this.alpha > 0.02;
+            }
+
+            draw() {
+                let brightness = isDarkMode ? 70 : 30;
+                stroke(0, 0, brightness, this.alpha);
+                strokeWeight(1);
+                noFill();
+
+                beginShape();
+                for (let p of this.points) {
+                    vertex(p.x, p.y);
+                }
+                endShape();
+            }
+        }
+
+        // Exposed function for triggering resonance from UI interactions
+        window.triggerResonance = function(x, y) {
+            for (let line of lines) {
+                let dist = abs(line.baseX - x);
+                let falloff = exp(-dist * 0.025);
+                if (falloff > 0.05) {
+                    line.excite(falloff, x, y);
+                }
+            }
+        };
+
+        function setup() {
+            let canvas = createCanvas(windowWidth, windowHeight);
+            canvas.parent('canvas-container');
+            colorMode(HSB, 360, 100, 100, 1);
+
+            let spacing = width / (NUM_LINES + 1);
+            for (let i = 0; i < NUM_LINES; i++) {
+                let x = spacing * (i + 1);
+                lines.push(new DriftLine(x, i));
+            }
+        }
+
+        function draw() {
+            let bgBrightness = isDarkMode ? 5 : 98;
+            background(0, 0, bgBrightness);
+
+            time += currentSpeed;
+
+            trailLines = trailLines.filter(trail => {
+                trail.draw();
+                return trail.update();
+            });
+
+            for (let line of lines) {
+                line.update();
+                line.draw();
+            }
+        }
+
+        function windowResized() {
+            resizeCanvas(windowWidth, windowHeight);
+
+            let spacing = width / (NUM_LINES + 1);
+            for (let i = 0; i < lines.length; i++) {
+                lines[i].baseX = spacing * (i + 1);
+            }
+        }
     </script>
 </body>
 </html>
