@@ -583,6 +583,88 @@
             color: #222;
             border-color: #999;
         }
+
+        /* Responsive styles */
+        @media (max-width: 768px) {
+            header {
+                flex-wrap: wrap;
+                gap: 12px;
+                padding: 20px;
+            }
+            header h1 {
+                font-size: 18px;
+                width: 100%;
+                margin-bottom: 8px;
+            }
+            main {
+                flex-direction: column;
+                align-items: center;
+                gap: 32px;
+                padding: 20px;
+            }
+            .chord-container {
+                min-width: unset;
+                width: 100%;
+                max-width: 300px;
+            }
+            .chord-tile {
+                width: 100%;
+            }
+            .button-row {
+                flex-direction: column;
+            }
+            .piano-dialog {
+                padding: 20px;
+                margin: 16px;
+                max-width: calc(100% - 32px);
+            }
+            .piano-container {
+                height: 100px;
+            }
+            .settings-dialog {
+                margin: 16px;
+                min-width: unset;
+                width: calc(100% - 32px);
+            }
+        }
+
+        @media (max-width: 480px) {
+            header {
+                padding: 16px;
+            }
+            header h1 {
+                font-size: 16px;
+                letter-spacing: 1px;
+            }
+            #connectBtn, #settings-btn {
+                padding: 6px 10px;
+                font-size: 10px;
+            }
+            #status {
+                font-size: 10px;
+            }
+            main {
+                padding: 16px;
+            }
+            section h2 {
+                font-size: 10px;
+                letter-spacing: 2px;
+            }
+            .chord-tile {
+                padding: 8px 12px;
+                font-size: 14px;
+            }
+            .chord-tile .info-btn,
+            .chord-tile .remove-btn {
+                width: 18px;
+                height: 18px;
+                font-size: 10px;
+                line-height: 16px;
+            }
+            .piano-container {
+                height: 80px;
+            }
+        }
     </style>
 </head>
 <body>
@@ -777,8 +859,15 @@
             }
         });
 
-        document.getElementById('clearBtn').addEventListener('click', () => {
+        const clearBtn = document.getElementById('clearBtn');
+
+        function updateClearBtn() {
+            clearBtn.disabled = progList.children.length === 0;
+        }
+
+        clearBtn.addEventListener('click', () => {
             progList.innerHTML = '';
+            updateClearBtn();
         });
 
         // --- Piano Modal ---
@@ -899,6 +988,7 @@
                 e.stopPropagation();
                 if (tile.parentElement === progList) {
                     tile.remove();
+                    updateClearBtn();
                 }
             });
 
@@ -992,6 +1082,7 @@
                     }
                 }
             }
+            updateClearBtn();
         });
 
         // --- State helpers ---
@@ -1008,6 +1099,7 @@
                     progList.appendChild(createChordTile(id, true));
                 }
             });
+            updateClearBtn();
         }
 
         // Initialize with default (all chords)

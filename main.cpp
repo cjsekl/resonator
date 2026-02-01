@@ -573,18 +573,18 @@ protected:
         AudioOut1((int16_t)mixedOutput1);
         AudioOut2((int16_t)mixedOutput2);
 
-        // LED indicators - all 6 LEDs show chord mode
-        // Single LED: HARMONIC(0), FIFTH(1), MAJOR7(2), MINOR7(3), DIM(4), SUS4(5)
-        // Pairs for extended chords:
-        // ADD9(6): 0+5, MAJOR10(7): 1+3, SUS2(8): 0+2, MAJOR(9): 1+2
-        // MINOR(10): 3+4, MAJOR6(11): 2+4, DOM7(12): 0+4, MIN9(13): 3+5
-        // TANPURA_PA(14): 1+4, TANPURA_MA(15): 2+3, TANPURA_NI(16): 0+3, TANPURA_NI_KOMAL(17): 2+5
-        LedOn(0, currentMode == HARMONIC || currentMode == ADD9 || currentMode == SUS2 || currentMode == DOM7 || currentMode == TANPURA_NI);
-        LedOn(1, currentMode == FIFTH || currentMode == MAJOR10 || currentMode == MAJOR || currentMode == TANPURA_PA);
-        LedOn(2, currentMode == MAJOR7 || currentMode == SUS2 || currentMode == MAJOR || currentMode == MAJOR6 || currentMode == TANPURA_MA || currentMode == TANPURA_NI_KOMAL);
-        LedOn(3, currentMode == MINOR7 || currentMode == MAJOR10 || currentMode == MINOR || currentMode == MIN9 || currentMode == TANPURA_MA || currentMode == TANPURA_NI);
-        LedOn(4, currentMode == DIM || currentMode == MINOR || currentMode == MAJOR6 || currentMode == DOM7 || currentMode == TANPURA_PA);
-        LedOn(5, currentMode == SUS4 || currentMode == ADD9 || currentMode == MIN9 || currentMode == TANPURA_NI_KOMAL);
+        // LED indicators - show position in progression (0-17)
+        // Single LED: positions 0-5
+        // Pairs for positions 6-17:
+        // 6: 0+5, 7: 1+3, 8: 0+2, 9: 1+2
+        // 10: 3+4, 11: 2+4, 12: 0+4, 13: 3+5
+        // 14: 1+4, 15: 2+3, 16: 0+3, 17: 2+5
+        LedOn(0, progressionIndex == 0 || progressionIndex == 6 || progressionIndex == 8 || progressionIndex == 12 || progressionIndex == 16);
+        LedOn(1, progressionIndex == 1 || progressionIndex == 7 || progressionIndex == 9 || progressionIndex == 14);
+        LedOn(2, progressionIndex == 2 || progressionIndex == 8 || progressionIndex == 9 || progressionIndex == 11 || progressionIndex == 15 || progressionIndex == 17);
+        LedOn(3, progressionIndex == 3 || progressionIndex == 7 || progressionIndex == 10 || progressionIndex == 13 || progressionIndex == 15 || progressionIndex == 16);
+        LedOn(4, progressionIndex == 4 || progressionIndex == 10 || progressionIndex == 11 || progressionIndex == 12 || progressionIndex == 14);
+        LedOn(5, progressionIndex == 5 || progressionIndex == 6 || progressionIndex == 13 || progressionIndex == 17);
     }
 };
 
