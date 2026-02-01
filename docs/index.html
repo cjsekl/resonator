@@ -1140,6 +1140,14 @@
             if (e.target === settingsModal) settingsModal.classList.remove('visible');
         });
 
+        // Close dialogs with Escape key
+        document.addEventListener('keydown', (e) => {
+            if (e.key === 'Escape') {
+                settingsModal.classList.remove('visible');
+                pianoModal.classList.remove('visible');
+            }
+        });
+
         // Theme toggle
         document.getElementById('theme-btn').addEventListener('click', () => {
             isDarkMode = !isDarkMode;
