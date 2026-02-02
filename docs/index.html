@@ -100,12 +100,12 @@
             min-height: 200px;
             min-width: 258px;
             border: 1px solid #1a1a1a;
-            padding: 4px;
+            padding: 4px 4px 40px 4px;
             display: inline-flex;
             flex-direction: column;
             gap: 2px;
             transition: border-color 0.3s;
-            background: rgba(10, 10, 10, 0.1);
+            background: rgba(10, 10, 10, 0.2);
             backdrop-filter: blur(0.5px);
             width: fit-content;
         }
@@ -215,6 +215,36 @@
             color: #333;
             font-size: 13px;
             font-style: italic;
+        }
+
+        .settings-row input[type="range"] {
+            width: 140px;
+            -webkit-appearance: none;
+            appearance: none;
+            height: 3px;
+            background: #444;
+            outline: none;
+            opacity: 0.7;
+            transition: opacity .2s;
+        }
+        .settings-row input[type="range"]:hover {
+            opacity: 1;
+        }
+        .settings-row input[type="range"]::-webkit-slider-thumb {
+            -webkit-appearance: none;
+            appearance: none;
+            width: 14px;
+            height: 14px;
+            background: #999;
+            cursor: pointer;
+            border-radius: 50%;
+        }
+        .settings-row input[type="range"]::-moz-range-thumb {
+            width: 14px;
+            height: 14px;
+            background: #999;
+            cursor: pointer;
+            border-radius: 50%;
         }
 
         /* Settings Modal */
@@ -448,6 +478,16 @@
         body.light-mode .settings-close:hover {
             color: #222;
             border-color: #999;
+        }
+
+        body.light-mode .settings-row input[type="range"] {
+            background: #ccc;
+        }
+        body.light-mode .settings-row input[type="range"]::-webkit-slider-thumb {
+            background: #666;
+        }
+        body.light-mode .settings-row input[type="range"]::-moz-range-thumb {
+            background: #666;
         }
 
         /* Piano Modal */
@@ -692,6 +732,18 @@
                     <input type="checkbox" id="animations-toggle" checked>
                     <span class="toggle-slider"></span>
                 </label>
+            </div>
+            <div class="settings-row">
+                <span>Drift</span>
+                <input type="range" id="drift-slider" min="0" max="400" value="150" step="1">
+            </div>
+            <div class="settings-row">
+                <span>Speed</span>
+                <input type="range" id="speed-slider" min="0.001" max="0.05" value="0.01" step="0.001">
+            </div>
+            <div class="settings-row">
+                <span>Noise</span>
+                <input type="range" id="noise-slider" min="0.1" max="2.0" value="0.5" step="0.1">
             </div>
             <button class="settings-close" id="settings-close">Close</button>
         </div>
@@ -980,6 +1032,13 @@
                 e.dataTransfer.setData("text/plain", String(chordId));
             });
 
+            tile.addEventListener("drag", (e) => {
+                // Only trigger if coordinates are not zero, which can happen at the start of a drag.
+                if (window.triggerResonance && (e.clientX !== 0 || e.clientY !== 0)) {
+                    window.triggerResonance(e.clientX, e.clientY);
+                }
+            });
+
             tile.addEventListener("dragend", () => {
                 tile.classList.remove("dragging");
                 clearDropIndicators();
@@ -1053,11 +1112,7 @@
             const chordId = parseInt(e.dataTransfer.getData("text/plain"));
             const dropIdx = getDropIndex(progList, e.clientY);
 
-            // Randomize viz params and trigger string resonance on drop
-            randomizeVizParams();
-            if (window.triggerResonance) {
-                window.triggerResonance(e.clientX, e.clientY);
-            }
+            // (Visualization parameters are now controlled by sliders)
 
             if (dragFromPalette) {
                 // Copy from palette
@@ -1117,22 +1172,30 @@
         let trailLines = [];
 
         // Visualization parameters
-        let currentNoiseScale = 0.5;
-        let currentDriftAmount = 150;
-        let currentSpeed = 0.01;
-        let currentDecay = 0.98;
         let isDarkMode = true;
+        let currentDriftAmount, currentSpeed, currentNoiseScale;
+        const currentDecay = 0.933; // Fixed decay value
 
-        // Randomize visualization parameters
-        function randomizeVizParams() {
-            currentDriftAmount = 50 + Math.random() * 350;  // 50-400
-            currentSpeed = 0.002 + Math.random() * 0.048;   // 0.002-0.05
-            currentNoiseScale = 0.1 + Math.random() * 1.9;  // 0.1-2.0
-            currentDecay = 0.9 + Math.random() * 0.095;     // 0.9-0.995
+        // --- Settings Modal & Parameter Controls ---
+        const settingsModal = document.getElementById('settings-modal');
+        const driftSlider = document.getElementById('drift-slider');
+        const speedSlider = document.getElementById('speed-slider');
+        const noiseSlider = document.getElementById('noise-slider');
+
+        function updateVizParamsFromUI() {
+            currentDriftAmount = parseFloat(driftSlider.value);
+            currentSpeed = parseFloat(speedSlider.value);
+            currentNoiseScale = parseFloat(noiseSlider.value);
         }
 
-        // Settings modal
-        const settingsModal = document.getElementById('settings-modal');
+        // Set initial values from sliders
+        updateVizParamsFromUI();
+
+        // Add listeners to update params on change
+        driftSlider.addEventListener('input', () => currentDriftAmount = parseFloat(driftSlider.value));
+        speedSlider.addEventListener('input', () => currentSpeed = parseFloat(speedSlider.value));
+        noiseSlider.addEventListener('input', () => currentNoiseScale = parseFloat(noiseSlider.value));
+
         document.getElementById('settings-btn').addEventListener('click', () => {
             settingsModal.classList.add('visible');
         });
@@ -1186,18 +1249,18 @@
             }
 
             update() {
-                if (this.excitation > 0.15 && this.lastPoints.length > 0 && frameCount % 3 === 0) {
-                    trailLines.push(new TrailLine(this.lastPoints.slice(), this.excitation * 0.7));
+                if (this.excitation > 0.05 && this.lastPoints.length > 0 && frameCount % 3 === 0) { // Reduced threshold for trail creation
+                    trailLines.push(new TrailLine(this.lastPoints.slice(), this.excitation * 0.3)); // Reduced initial alpha for trails
                 }
                 this.excitation *= currentDecay;
                 if (this.excitation < 0.001) this.excitation = 0;
             }
 
             draw() {
-                let alpha = map(this.excitation, 0, 1, 0.2, 0.8);
-                let weight = map(this.excitation, 0, 1, 0.5, 1.5);
+                let alpha = map(this.excitation, 0, 1, 0.01, 0.15); // Made even fainter
+                let weight = map(this.excitation, 0, 1, 0.2, 0.8); // Made thinner
 
-                let brightness = isDarkMode ? 70 : 30;
+                let brightness = isDarkMode ? 50 : 20; // Keep brightness
                 stroke(0, 0, brightness, alpha);
                 strokeWeight(weight);
                 noFill();
@@ -1243,7 +1306,7 @@
             }
 
             draw() {
-                let brightness = isDarkMode ? 70 : 30;
+                let brightness = isDarkMode ? 50 : 20; // Made slightly darker/less prominent
                 stroke(0, 0, brightness, this.alpha);
                 strokeWeight(1);
                 noFill();
