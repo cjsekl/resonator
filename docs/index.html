@@ -1167,9 +1167,17 @@
         // p5.js String Resonance Visualization
         // ========================================
         let time = 0;
-        const NUM_LINES = 120;
         let lines = [];
         let trailLines = [];
+
+        // --- Performance Settings ---
+        const isMobile = /Android|webOS|iPhone|iPad|iPod|BlackBerry|IEMobile|Opera Mini/i.test(navigator.userAgent);
+        const vizSettings = {
+            numLines: isMobile ? 50 : 120,
+            yStep: isMobile ? 8 : 3,
+            trailFrameInterval: isMobile ? 5 : 3
+        };
+        const NUM_LINES = vizSettings.numLines;
 
         // Visualization parameters
         let isDarkMode = true;
@@ -1249,8 +1257,8 @@
             }
 
             update() {
-                if (this.excitation > 0.05 && this.lastPoints.length > 0 && frameCount % 3 === 0) { // Reduced threshold for trail creation
-                    trailLines.push(new TrailLine(this.lastPoints.slice(), this.excitation * 0.3)); // Reduced initial alpha for trails
+                if (this.excitation > 0.05 && this.lastPoints.length > 0 && frameCount % vizSettings.trailFrameInterval === 0) {
+                    trailLines.push(new TrailLine(this.lastPoints.slice(), this.excitation * 0.3));
                 }
                 this.excitation *= currentDecay;
                 if (this.excitation < 0.001) this.excitation = 0;
@@ -1268,7 +1276,7 @@
                 this.lastPoints = [];
 
                 beginShape();
-                for (let y = 0; y <= height; y += 3) {
+                for (let y = 0; y <= height; y += vizSettings.yStep) {
                     let drift = 0;
                     if (this.excitation > 0) {
                         let distX = abs(this.baseX - this.exciteX);
