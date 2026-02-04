@@ -1,8 +1,15 @@
 #include "ComputerCard.h"
 #include "pico/stdlib.h"
 #include "pico/multicore.h"
+#include "hardware/flash.h"
+#include "hardware/sync.h"
 #include <cstring>
 #include <cstdio>
+
+// Flash storage for progression persistence
+// Use last sector of flash (4KB before end of 2MB)
+#define FLASH_PROG_OFFSET (PICO_FLASH_SIZE_BYTES - FLASH_SECTOR_SIZE)
+#define FLASH_PROG_MAGIC 0xAB
 
 /**
 Resonator Workshop System Computer Card - by Johan Eklund
@@ -310,18 +317,21 @@ public:
                           pulseExciteEnvelope(0), noiseState(12345),
                           dcState1(0), dcState2(0), dcState3(0), dcState4(0),
                           smoothDelay1(0), smoothDelay2(0), smoothDelay3(0), smoothDelay4(0) {
-        // Default progression: all chords (card works standalone without browser UI)
-        const ChordMode allChords[] = {
-            HARMONIC, FIFTH, MAJOR7, MINOR7, DIM, SUS4, ADD9, MAJOR10,
-            SUS2, MAJOR, MINOR, MAJOR6, DOM7, MIN9,
-            TANPURA_PA, TANPURA_MA, TANPURA_NI, TANPURA_NI_KOMAL
-        };
-        for (int i = 0; i < NUM_MODES; i++) {
-            progressionBuffers[0].chords[i] = allChords[i];
-            progressionBuffers[1].chords[i] = allChords[i];
+        // Try to load progression from flash, fall back to defaults
+        if (!loadProgressionFromFlash()) {
+            // Default progression: all chords (card works standalone without browser UI)
+            const ChordMode allChords[] = {
+                HARMONIC, FIFTH, MAJOR7, MINOR7, DIM, SUS4, ADD9, MAJOR10,
+                SUS2, MAJOR, MINOR, MAJOR6, DOM7, MIN9,
+                TANPURA_PA, TANPURA_MA, TANPURA_NI, TANPURA_NI_KOMAL
+            };
+            for (int i = 0; i < NUM_MODES; i++) {
+                progressionBuffers[0].chords[i] = allChords[i];
+                progressionBuffers[1].chords[i] = allChords[i];
+            }
+            progressionBuffers[0].length = NUM_MODES;
+            progressionBuffers[1].length = NUM_MODES;
         }
-        progressionBuffers[0].length = NUM_MODES;
-        progressionBuffers[1].length = NUM_MODES;
 
         // Initialize delay lines with silence
         for (int i = 0; i < MAX_DELAY_SIZE; i++) {
@@ -382,6 +392,9 @@ private:
         progressionChanged = true;
 
         handleGet();
+
+        // Persist to flash
+        saveProgressionToFlash();
     }
 
     void handleGet() {
@@ -392,6 +405,57 @@ private:
             printf("%d", (int)progressionBuffers[bufIdx].chords[i]);
         }
         printf("\n");
+    }
+
+    // Save current progression to flash
+    void saveProgressionToFlash() {
+        int bufIdx = activeBuffer;
+        int len = progressionBuffers[bufIdx].length;
+
+        // Prepare data buffer (must be 256-byte aligned for flash write)
+        uint8_t data[FLASH_PAGE_SIZE] = {0};
+        data[0] = FLASH_PROG_MAGIC;
+        data[1] = (uint8_t)len;
+        for (int i = 0; i < len && i < MAX_PROGRESSION_LENGTH; i++) {
+            data[2 + i] = (uint8_t)progressionBuffers[bufIdx].chords[i];
+        }
+
+        // Disable interrupts for flash operation
+        uint32_t ints = save_and_disable_interrupts();
+        flash_range_erase(FLASH_PROG_OFFSET, FLASH_SECTOR_SIZE);
+        flash_range_program(FLASH_PROG_OFFSET, data, FLASH_PAGE_SIZE);
+        restore_interrupts(ints);
+    }
+
+    // Load progression from flash, returns true if valid data found
+    bool loadProgressionFromFlash() {
+        // Read from flash (XIP address space)
+        const uint8_t* flash_data = (const uint8_t*)(XIP_BASE + FLASH_PROG_OFFSET);
+
+        // Check magic byte
+        if (flash_data[0] != FLASH_PROG_MAGIC) {
+            return false;
+        }
+
+        int len = flash_data[1];
+        if (len < 1 || len > MAX_PROGRESSION_LENGTH) {
+            return false;
+        }
+
+        // Load into both buffers
+        for (int i = 0; i < len; i++) {
+            uint8_t modeVal = flash_data[2 + i];
+            if (modeVal >= NUM_MODES) {
+                return false;  // Invalid chord ID
+            }
+            ChordMode mode = (ChordMode)modeVal;
+            progressionBuffers[0].chords[i] = mode;
+            progressionBuffers[1].chords[i] = mode;
+        }
+        progressionBuffers[0].length = len;
+        progressionBuffers[1].length = len;
+
+        return true;
     }
 
 protected:
