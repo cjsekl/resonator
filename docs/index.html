@@ -755,7 +755,7 @@
         </div>
     </div>
     <div id="noSerial" class="no-serial" style="display:none;">
-        Web Serial API is not supported in this browser. Please use Chrome or Edge.
+        Web MIDI API is not supported in this browser. Please use Chrome, Edge, or Firefox.
     </div>
     <main id="mainContent">
         <section>
@@ -812,26 +812,31 @@
             { id: 17, name: "TANPURA NI KOMAL", desc: "Sa, ni, Sa', Sa''", family: "tanpura" },
         ];
 
-        let port = null;
-        let writer = null;
-        let reader = null;
-        let readBuffer = "";
+        let midiOutput = null;
+        let midiInput = null;
+        let midiAccess = null;
         let dragSourceIndex = -1;
         let dragFromPalette = false;
         let dragChordId = -1;
 
-        // --- Web Serial ---
+        // SysEx protocol constants (matching firmware)
+        const SYSEX_MANUFACTURER = 0x7D;  // Development/instruments
+        const SYSEX_CMD_PREVIEW = 1;
+        const SYSEX_CMD_WRITE = 2;
+        const SYSEX_CMD_READ = 3;
+
+        // --- Web MIDI ---
         const connectBtn = document.getElementById("connectBtn");
         const statusEl = document.getElementById("status");
         const sendBtn = document.getElementById("sendBtn");
 
-        if (!("serial" in navigator)) {
+        if (!("requestMIDIAccess" in navigator)) {
             document.getElementById("noSerial").style.display = "block";
             document.getElementById("mainContent").style.display = "none";
         }
 
         connectBtn.addEventListener("click", async () => {
-            if (port) {
+            if (midiAccess) {
                 await disconnect();
             } else {
                 await connect();
@@ -840,13 +845,49 @@
 
         async function connect() {
             try {
-                port = await navigator.serial.requestPort();
-                await port.open({ baudRate: 115200 });
+                midiAccess = await navigator.requestMIDIAccess({ sysex: true });
 
-                writer = port.writable.getWriter();
-                const textDecoder = new TextDecoderStream();
-                port.readable.pipeTo(textDecoder.writable);
-                reader = textDecoder.readable.getReader();
+                // Log available devices
+                console.log("MIDI Outputs:");
+                for (const output of midiAccess.outputs.values()) {
+                    console.log("  -", output.name, output.id);
+                }
+                console.log("MIDI Inputs:");
+                for (const input of midiAccess.inputs.values()) {
+                    console.log("  -", input.name, input.id);
+                }
+
+                // Find Resonator device
+                for (const output of midiAccess.outputs.values()) {
+                    if (output.name.includes("Resonator") || output.name.includes("Computer")) {
+                        midiOutput = output;
+                        break;
+                    }
+                }
+                for (const input of midiAccess.inputs.values()) {
+                    if (input.name.includes("Resonator") || input.name.includes("Computer")) {
+                        midiInput = input;
+                        break;
+                    }
+                }
+
+                // If not found by name, use first available
+                if (!midiOutput && midiAccess.outputs.size > 0) {
+                    midiOutput = midiAccess.outputs.values().next().value;
+                }
+                if (!midiInput && midiAccess.inputs.size > 0) {
+                    midiInput = midiAccess.inputs.values().next().value;
+                }
+
+                console.log("Selected output:", midiOutput?.name);
+                console.log("Selected input:", midiInput?.name);
+
+                if (!midiOutput || !midiInput) {
+                    throw new Error("No MIDI device found");
+                }
+
+                // Set up message handler
+                midiInput.onmidimessage = handleMidiMessage;
 
                 statusEl.textContent = "Connected";
                 statusEl.className = "connected";
@@ -854,21 +895,22 @@
                 connectBtn.className = "connected";
                 sendBtn.disabled = false;
 
-                readLoop();
-                sendCommand("GET\n");
+                // Request current progression
+                sendSysEx(SYSEX_CMD_READ, []);
             } catch (e) {
                 console.error("Connection failed:", e);
+                midiAccess = null;
             }
         }
 
         async function disconnect() {
-            try {
-                if (reader) { await reader.cancel(); reader = null; }
-                if (writer) { writer.releaseLock(); writer = null; }
-                if (port) { await port.close(); port = null; }
-            } catch (e) {
-                console.error("Disconnect error:", e);
+            if (midiInput) {
+                midiInput.onmidimessage = null;
             }
+            midiOutput = null;
+            midiInput = null;
+            midiAccess = null;
+
             statusEl.textContent = "Disconnected";
             statusEl.className = "";
             connectBtn.textContent = "Connect USB";
@@ -876,42 +918,36 @@
             sendBtn.disabled = true;
         }
 
-        async function readLoop() {
-            try {
-                while (true) {
-                    const { value, done } = await reader.read();
-                    if (done) break;
-                    readBuffer += value;
-                    let lines = readBuffer.split("\n");
-                    readBuffer = lines.pop();
-                    for (const line of lines) {
-                        handleResponse(line.trim());
-                    }
+        function handleMidiMessage(event) {
+            const data = event.data;
+            console.log("MIDI received:", Array.from(data).map(b => b.toString(16).padStart(2, '0')).join(' '));
+            // Check for SysEx response: F0 7D 00 <len> <data...> F7
+            if (data[0] === 0xF0 && data[1] === SYSEX_MANUFACTURER && data[2] === 0x00) {
+                const len = data[3];
+                const ids = [];
+                for (let i = 0; i < len; i++) {
+                    ids.push(data[4 + i]);
                 }
-            } catch (e) {
-                if (port) console.error("Read error:", e);
-            }
-        }
-
-        function handleResponse(line) {
-            if (line.startsWith("PROG ")) {
-                const ids = line.substring(5).split(",").map(Number);
+                console.log("Received progression:", ids);
                 setProgression(ids);
-            } else if (line.startsWith("ERR ")) {
-                console.error("Device error:", line.substring(4));
             }
         }
 
-        async function sendCommand(cmd) {
-            if (!writer) return;
-            const encoder = new TextEncoder();
-            await writer.write(encoder.encode(cmd));
+        function sendSysEx(cmd, chordIds) {
+            if (!midiOutput) {
+                console.log("No MIDI output available");
+                return;
+            }
+            // Format: F0 7D <cmd> <len> <data...> F7
+            const msg = [0xF0, SYSEX_MANUFACTURER, cmd, chordIds.length, ...chordIds, 0xF7];
+            console.log("Sending SysEx:", msg.map(b => b.toString(16).padStart(2, '0')).join(' '));
+            midiOutput.send(msg);
         }
 
         sendBtn.addEventListener("click", (e) => {
             const ids = getProgressionIds();
             if (ids.length === 0) return;
-            sendCommand("SET " + ids.join(",") + "\n");
+            sendSysEx(SYSEX_CMD_WRITE, ids);
 
             // Trigger resonance wave when sending to device
             if (window.triggerResonance) {

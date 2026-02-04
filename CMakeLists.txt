@@ -19,6 +19,7 @@ pico_sdk_init()
 # Add executable target
 add_executable(resonator
     main.cpp
+    usb_descriptors.cpp
 )
 
 # Link libraries required by the Pico SDK and ComputerCard
@@ -33,20 +34,22 @@ target_link_libraries(resonator
     hardware_flash
     hardware_irq
     hardware_clocks
+    hardware_sync
     pico_multicore
     pico_unique_id
+    tinyusb_device
+    tinyusb_board
 )
 
-# Run from RAM to prevent flash access delays during audio
-pico_set_binary_type(resonator copy_to_ram)
+# Note: No longer using copy_to_ram - multicore_lockout pauses audio during flash writes
 
 # Create map/bin/hex/uf2 files
 pico_add_extra_outputs(resonator)
 
 target_compile_definitions(resonator PUBLIC PICO_XOSC_STARTUP_DELAY_MULTIPLIER=64)
 
-# Enable USB stdio
-pico_enable_stdio_usb(resonator 1)
+# Disable stdio (using TinyUSB MIDI directly)
+pico_enable_stdio_usb(resonator 0)
 pico_enable_stdio_uart(resonator 0)
 
 # Set compiler flags for optimization

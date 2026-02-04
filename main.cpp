@@ -3,13 +3,20 @@
 #include "pico/multicore.h"
 #include "hardware/flash.h"
 #include "hardware/sync.h"
+#include "bsp/board.h"
+#include "tusb.h"
 #include <cstring>
-#include <cstdio>
 
 // Flash storage for progression persistence
 // Use last sector of flash (4KB before end of 2MB)
 #define FLASH_PROG_OFFSET (PICO_FLASH_SIZE_BYTES - FLASH_SECTOR_SIZE)
 #define FLASH_PROG_MAGIC 0xAB
+
+// SysEx protocol constants (matching Twists)
+#define SYSEX_MANUFACTURER_DEV  0x7D  // Development/instruments
+#define SYSEX_COMMAND_PREVIEW   1     // Load to RAM only
+#define SYSEX_COMMAND_WRITE     2     // Load to RAM + persist to flash
+#define SYSEX_COMMAND_READ      3     // Return current progression
 
 /**
 Resonator Workshop System Computer Card - by Johan Eklund
@@ -342,69 +349,74 @@ public:
         }
     }
 
-    // Serial command handler (called from Core 1)
-    void handleSerialCommand(const char* cmd) {
-        if (strncmp(cmd, "SET ", 4) == 0) {
-            handleSet(cmd + 4);
-        } else if (strcmp(cmd, "GET") == 0) {
-            handleGet();
-        } else {
-            printf("ERR unknown_command\n");
+    // SysEx command handler (called from Core 1)
+    // Format: F0 7D <cmd> <len> <data...> F7
+    void handleSysEx(uint8_t* data, int len) {
+        if (len < 4) return;  // Too short
+        if (data[0] != SYSEX_MANUFACTURER_DEV) return;  // Wrong manufacturer
+
+        uint8_t cmd = data[1];
+        uint8_t dataLen = data[2];
+
+        switch (cmd) {
+            case SYSEX_COMMAND_PREVIEW:
+                // Load to RAM only (for testing)
+                loadProgression(&data[3], dataLen, false);
+                break;
+
+            case SYSEX_COMMAND_WRITE:
+                // Load to RAM + persist to flash
+                loadProgression(&data[3], dataLen, true);
+                sendCurrentProgression();
+                break;
+
+            case SYSEX_COMMAND_READ:
+                // Return current progression
+                sendCurrentProgression();
+                break;
         }
     }
 
 private:
-    void handleSet(const char* args) {
-        ChordMode newChords[MAX_PROGRESSION_LENGTH];
-        int count = 0;
-        const char* p = args;
+    void loadProgression(uint8_t* chordData, int count, bool persist) {
+        if (count < 1 || count > MAX_PROGRESSION_LENGTH) return;
 
-        while (*p && count < MAX_PROGRESSION_LENGTH) {
-            int val = 0;
-            bool hasDigit = false;
-            while (*p >= '0' && *p <= '9') {
-                val = val * 10 + (*p - '0');
-                p++;
-                hasDigit = true;
-            }
-            if (!hasDigit) break;
-            if (val < 0 || val >= NUM_MODES) {
-                printf("ERR invalid_id\n");
-                return;
-            }
-            newChords[count++] = (ChordMode)val;
-            if (*p == ',') p++;
-        }
-
-        if (count == 0) {
-            printf("ERR empty_progression\n");
-            return;
+        // Validate all chord IDs
+        for (int i = 0; i < count; i++) {
+            if (chordData[i] >= NUM_MODES) return;
         }
 
         // Write to inactive buffer, then swap
         int writeIdx = 1 - activeBuffer;
         for (int i = 0; i < count; i++) {
-            progressionBuffers[writeIdx].chords[i] = newChords[i];
+            progressionBuffers[writeIdx].chords[i] = (ChordMode)chordData[i];
         }
         progressionBuffers[writeIdx].length = count;
         __dmb();  // ARM data memory barrier
         activeBuffer = writeIdx;
         progressionChanged = true;
 
-        handleGet();
-
-        // Persist to flash
-        saveProgressionToFlash();
+        if (persist) {
+            saveProgressionToFlash();
+        }
     }
 
-    void handleGet() {
+    void sendCurrentProgression() {
         int bufIdx = activeBuffer;
-        printf("PROG ");
-        for (int i = 0; i < progressionBuffers[bufIdx].length; i++) {
-            if (i > 0) printf(",");
-            printf("%d", (int)progressionBuffers[bufIdx].chords[i]);
+        int len = progressionBuffers[bufIdx].length;
+
+        // Build SysEx response: F0 7D 00 <len> <data...> F7
+        uint8_t response[64];
+        response[0] = 0xF0;  // SysEx start
+        response[1] = SYSEX_MANUFACTURER_DEV;
+        response[2] = 0x00;  // Response indicator
+        response[3] = (uint8_t)len;
+        for (int i = 0; i < len; i++) {
+            response[4 + i] = (uint8_t)progressionBuffers[bufIdx].chords[i];
         }
-        printf("\n");
+        response[4 + len] = 0xF7;  // SysEx end
+
+        tud_midi_stream_write(0, response, 5 + len);
     }
 
     // Save current progression to flash
@@ -420,11 +432,18 @@ private:
             data[2 + i] = (uint8_t)progressionBuffers[bufIdx].chords[i];
         }
 
-        // Disable interrupts for flash operation
+        // Pause audio core during flash operation
+        multicore_lockout_start_blocking();
+
         uint32_t ints = save_and_disable_interrupts();
         flash_range_erase(FLASH_PROG_OFFSET, FLASH_SECTOR_SIZE);
+        restore_interrupts(ints);
+
+        ints = save_and_disable_interrupts();
         flash_range_program(FLASH_PROG_OFFSET, data, FLASH_PAGE_SIZE);
         restore_interrupts(ints);
+
+        multicore_lockout_end_blocking();
     }
 
     // Load progression from flash, returns true if valid data found
@@ -655,34 +674,39 @@ protected:
 // Global pointer for Core 1 to access shared state
 static ResonatingStrings* g_resonator = nullptr;
 
-void core1_serial_handler() {
-    sleep_ms(500);  // Wait for USB to settle
+// MIDI/SysEx handler running on Core 1
+void core1_midi_handler() {
+    board_init();
+    tusb_init();
 
-    char lineBuf[128];
-    int linePos = 0;
+    uint8_t buffer[64];
 
     while (true) {
-        int c = getchar_timeout_us(10000);  // 10ms timeout
-        if (c == PICO_ERROR_TIMEOUT) continue;
-        if (c == '\n' || c == '\r') {
-            if (linePos > 0) {
-                lineBuf[linePos] = '\0';
-                g_resonator->handleSerialCommand(lineBuf);
-                linePos = 0;
+        tud_task();  // Service USB device
+
+        // Read incoming MIDI stream (raw bytes, not USB-MIDI packets)
+        while (tud_midi_available()) {
+            uint32_t count = tud_midi_stream_read(buffer, sizeof(buffer));
+            if (count > 0 && buffer[0] == 0xF0) {
+                // SysEx message - find end and process
+                // Data starts at buffer[1], skip F0 and F7
+                int dataLen = 0;
+                for (uint32_t i = 1; i < count && buffer[i] != 0xF7; i++) {
+                    buffer[dataLen++] = buffer[i];  // Shift data to start of buffer
+                }
+                if (dataLen > 0) {
+                    g_resonator->handleSysEx(buffer, dataLen);
+                }
             }
-        } else if (linePos < 127) {
-            lineBuf[linePos++] = (char)c;
         }
     }
 }
 
 int main() {
-    stdio_init_all();  // Initialize USB CDC
-
     static ResonatingStrings resonator;
     g_resonator = &resonator;
     resonator.EnableNormalisationProbe();
-    multicore_launch_core1(core1_serial_handler);
+    multicore_launch_core1(core1_midi_handler);
     resonator.Run();
     return 0;
 }
