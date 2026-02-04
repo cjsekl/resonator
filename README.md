@@ -27,51 +27,75 @@ The sympathetic resonator simulates the behavior of strings that vibrate in resp
 
 ### Switch
 - **Up**: Tuning mode - only the fundamental string sounds
-- **Down**: Cycles through eleven chord modes
-
-#### Chord Modes
-- **HARMONIC**: Harmonic series - 1:1, 2:1, 3:1, 4:1
-- **FIFTH**: Stacked fifths - 1:1, 3:2, 2:1, 3:1
-- **MAJOR7**: Major 7th chord - 1:1, 5:4, 3:2, 15:8
-- **MINOR7**: Minor 7th chord - 1:1, 6:5, 3:2, 9:5
-- **DIM**: Diminished - 1:1, 6:5, 36:25, 3:2
-- **SUS4**: Suspended 4th - 1:1, 4:3, 3:2, 2:1
-- **ADD9**: Major add 9 - 1:1, 5:4, 3:2, 9:4
-- **TANPURA_PA**: Tanpura Pa drone - 1:1, 3:2, 2:1, 4:1 (Sa, Pa, Sa', Sa'')
-- **TANPURA_MA**: Tanpura Ma drone - 1:1, 4:3, 2:1, 4:1 (Sa, Ma, Sa', Sa'')
-- **TANPURA_NI**: Tanpura Ni drone - 1:1, 15:8, 2:1, 4:1 (Sa, Ni, Sa', Sa'')
-- **TANPURA_NI_KOMAL**: Tanpura ni drone - 1:1, 9:5, 2:1, 4:1 (Sa, ni, Sa', Sa'')
+- **Middle**: Normal operation
+- **Down (momentary)**: Advance to next chord in progression
+- **Down (hold 3 seconds)**: Reset to factory defaults (all 18 chords)
 
 ### Pulse Inputs
 - **Pulse In 1**: Trigger string excitation (pluck with noise burst)
-- **Pulse In 2**: Reserved for future use
+- **Pulse In 2**: Advance to next chord in progression
+
+## Chord Modes
+
+18 chord voicings are available:
+
+- **HARMONIC**: Harmonic series - 1:1, 2:1, 3:1, 4:1
+- **FIFTH**: Stacked fifths - 1:1, 3:2, 2:1, 3:1
+- **MAJOR**: Major triad - 1:1, 5:4, 3:2, 2:1
+- **MAJOR6**: Major 6th - 1:1, 5:4, 3:2, 5:3
+- **MAJOR7**: Major 7th - 1:1, 5:4, 3:2, 15:8
+- **DOM7**: Dominant 7th - 1:1, 5:4, 3:2, 9:5
+- **ADD9**: Major add 9 - 1:1, 5:4, 3:2, 9:4
+- **MAJOR10**: Major 10th - 1:1, 5:4, 3:2, 5:2
+- **MINOR**: Minor triad - 1:1, 6:5, 3:2, 2:1
+- **MINOR7**: Minor 7th - 1:1, 6:5, 3:2, 9:5
+- **MIN9**: Minor add 9 - 1:1, 6:5, 3:2, 9:4
+- **DIM**: Diminished - 1:1, 6:5, 36:25, 3:2
+- **SUS2**: Suspended 2nd - 1:1, 9:8, 3:2, 2:1
+- **SUS4**: Suspended 4th - 1:1, 4:3, 3:2, 2:1
+
+### Tanpura Tunings
+- **TANPURA PA**: Sa, Pa, Sa', Sa'' - 1:1, 3:2, 2:1, 4:1
+- **TANPURA MA**: Sa, Ma, Sa', Sa'' - 1:1, 4:3, 2:1, 4:1
+- **TANPURA NI**: Sa, Ni, Sa', Sa'' - 1:1, 15:8, 2:1, 4:1
+- **TANPURA NI KOMAL**: Sa, ni, Sa', Sa'' - 1:1, 9:5, 2:1, 4:1
+
+## Web Editor
+
+A browser-based chord editor lets you customize which chords are in your progression and their order.
+
+### Using the Editor
+1. Connect your Resonator via USB
+2. Open the editor at [johaneklund.io/resonator](https://johaneklund.io/resonator)
+3. Click **Connect USB** and select `Pico` (may appear as `ttyACM0` on Linux)
+4. Drag chords from the palette to build your progression
+5. Click **Send to Device** to save
+
+Changes persist on the module even after power off.
+
+### Requirements
+- Chrome or Edge browser (Web Serial API required)
+- USB connection to Resonator
 
 ## LED Indicators
 
-All 6 LEDs indicate the current chord mode:
-
-| Mode | LEDs |
-|------|------|
-| HARMONIC | 0 |
-| FIFTH | 1 |
-| MAJOR7 | 2 |
-| MINOR7 | 3 |
-| DIM | 4 |
-| SUS4 | 5 |
-| ADD9 | 0 + 5 |
-| TANPURA_PA | 1 + 4 |
-| TANPURA_MA | 2 + 3 |
-| TANPURA_NI | 0 + 3 |
-| TANPURA_NI_KOMAL | 2 + 5 |
+The 6 LEDs show the current position in the chord progression (0-17). Single LEDs indicate positions 0-5, LED pairs indicate positions 6-17.
 
 ## Building
 
-Use the standard Workshop System build process:
 ```bash
-./build.sh
+mkdir build && cd build
+cmake ..
+make
 ```
 
-This will generate a `resonator.uf2` file in the `build/` directory.
+This generates `resonator.uf2` in the `build/` directory.
+
+## Flashing
+
+1. Hold BOOTSEL on the Pico while connecting USB
+2. Copy `resonator.uf2` to the mounted drive
+3. The Pico will reboot automatically
 
 ## References
 

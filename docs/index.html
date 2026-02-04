@@ -52,7 +52,7 @@
             color: #666;
         }
         #status.connected { color: #aaa; }
-        #connectBtn, #settings-btn {
+        #connectBtn, #settings-btn, #info-btn {
             padding: 8px 14px;
             border: 1px solid #333;
             border-radius: 0;
@@ -65,7 +65,7 @@
             text-transform: uppercase;
             transition: color 0.3s, border-color 0.3s;
         }
-        #connectBtn:hover, #settings-btn:hover { color: #e0e0e0; border-color: #666; }
+        #connectBtn:hover, #settings-btn:hover, #info-btn:hover { color: #e0e0e0; border-color: #666; }
         #connectBtn.connected { color: #bbb; border-color: #555; }
         .no-serial {
             position: relative;
@@ -429,12 +429,14 @@
             border-color: #ddd;
         }
         body.light-mode #connectBtn,
-        body.light-mode #settings-btn {
+        body.light-mode #settings-btn,
+        body.light-mode #info-btn {
             border-color: #ccc;
             color: #666;
         }
         body.light-mode #connectBtn:hover,
-        body.light-mode #settings-btn:hover {
+        body.light-mode #settings-btn:hover,
+        body.light-mode #info-btn:hover {
             color: #222;
             border-color: #999;
         }
@@ -476,6 +478,111 @@
             color: #666;
         }
         body.light-mode .settings-close:hover {
+            color: #222;
+            border-color: #999;
+        }
+
+        /* Info Modal */
+        #info-modal {
+            display: none;
+            position: fixed;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            z-index: 100;
+            background: rgba(0, 0, 0, 0.7);
+            backdrop-filter: blur(4px);
+            justify-content: center;
+            align-items: center;
+        }
+        #info-modal.visible {
+            display: flex;
+        }
+        .info-dialog {
+            background: #111;
+            border: 1px solid #333;
+            border-radius: 8px;
+            padding: 24px 32px;
+            max-width: 500px;
+            width: 90%;
+            max-height: 80vh;
+            overflow-y: auto;
+        }
+        .info-dialog h3 {
+            margin: 0 0 16px 0;
+            font-size: 18px;
+            font-weight: 400;
+            color: #e0e0e0;
+        }
+        .info-dialog h4 {
+            margin: 20px 0 8px 0;
+            font-size: 14px;
+            font-weight: 400;
+            color: #aaa;
+            text-transform: uppercase;
+            letter-spacing: 1px;
+        }
+        .info-dialog p, .info-dialog li {
+            font-size: 14px;
+            line-height: 1.6;
+            color: #999;
+            margin-bottom: 8px;
+        }
+        .info-dialog ul {
+            margin: 0 0 12px 0;
+            padding-left: 20px;
+        }
+        .info-dialog code {
+            background: #1a1a1a;
+            padding: 2px 6px;
+            border-radius: 3px;
+            font-family: monospace;
+            font-size: 12px;
+            color: #ccc;
+        }
+        .info-close {
+            display: block;
+            width: 100%;
+            margin-top: 20px;
+            padding: 10px;
+            background: transparent;
+            border: 1px solid #333;
+            color: #888;
+            font-family: inherit;
+            font-size: 12px;
+            text-transform: uppercase;
+            letter-spacing: 1px;
+            cursor: pointer;
+            transition: color 0.2s, border-color 0.2s;
+        }
+        .info-close:hover {
+            color: #e0e0e0;
+            border-color: #666;
+        }
+        body.light-mode .info-dialog {
+            background: #fff;
+            border-color: #ddd;
+        }
+        body.light-mode .info-dialog h3 {
+            color: #222;
+        }
+        body.light-mode .info-dialog h4 {
+            color: #666;
+        }
+        body.light-mode .info-dialog p,
+        body.light-mode .info-dialog li {
+            color: #555;
+        }
+        body.light-mode .info-dialog code {
+            background: #f0f0f0;
+            color: #333;
+        }
+        body.light-mode .info-close {
+            border-color: #ccc;
+            color: #666;
+        }
+        body.light-mode .info-close:hover {
             color: #222;
             border-color: #999;
         }
@@ -679,9 +786,14 @@
                 font-size: 16px;
                 letter-spacing: 1px;
             }
-            #connectBtn, #settings-btn {
+            #connectBtn, #settings-btn, #info-btn {
                 padding: 6px 10px;
                 font-size: 10px;
+            }
+            .info-dialog {
+                padding: 20px;
+                margin: 16px;
+                max-width: calc(100% - 32px);
             }
             #status {
                 font-size: 10px;
@@ -720,6 +832,7 @@
     <div id="canvas-container"></div>
     <header>
         <h1>Resonator Chord Editor</h1>
+        <button id="info-btn">?</button>
         <button id="settings-btn">⚙</button>
         <span id="status">Disconnected</span>
         <button id="connectBtn">Connect USB</button>
@@ -752,6 +865,42 @@
                 <input type="range" id="noise-slider" min="0.1" max="2.0" value="0.5" step="0.1">
             </div>
             <button class="settings-close" id="settings-close">Close</button>
+        </div>
+    </div>
+    <div id="info-modal">
+        <div class="info-dialog">
+            <h3>Resonator Chord Editor</h3>
+            <p>Configure which chords are available on your Resonator module and the order they cycle through.</p>
+
+            <h4>Connecting</h4>
+            <ul>
+                <li>Connect your Resonator via USB</li>
+                <li>Click <code>Connect USB</code> and select <code>Pico</code> (may appear as <code>ttyACM0</code> on Linux or <code>USB Serial Device</code> on Windows)</li>
+                <li>The current chord progression will load automatically</li>
+            </ul>
+
+            <h4>Editing Chords</h4>
+            <ul>
+                <li><strong>Add:</strong> Drag chords from the left palette to the right progression list</li>
+                <li><strong>Reorder:</strong> Drag chords within the progression to change their order</li>
+                <li><strong>Remove:</strong> Click the <code>&times;</code> button on any chord</li>
+                <li><strong>Preview:</strong> Click the <code>i</code> button to see chord intervals on a piano</li>
+            </ul>
+
+            <h4>Saving</h4>
+            <ul>
+                <li>Click <code>Send to Device</code> to save your progression</li>
+                <li>Changes persist on the module even after power off</li>
+            </ul>
+
+            <h4>Hardware Controls</h4>
+            <ul>
+                <li><strong>Switch down:</strong> Advance to next chord in progression</li>
+                <li><strong>Switch up:</strong> Tuning mode (fundamental only)</li>
+                <li><strong>Long press (3 sec):</strong> Reset to factory defaults (all 18 chords)</li>
+            </ul>
+
+            <button class="info-close" id="info-close">Close</button>
         </div>
     </div>
     <div id="noSerial" class="no-serial" style="display:none;">
@@ -1220,11 +1369,24 @@
             if (e.target === settingsModal) settingsModal.classList.remove('visible');
         });
 
+        // Info modal
+        const infoModal = document.getElementById('info-modal');
+        document.getElementById('info-btn').addEventListener('click', () => {
+            infoModal.classList.add('visible');
+        });
+        document.getElementById('info-close').addEventListener('click', () => {
+            infoModal.classList.remove('visible');
+        });
+        infoModal.addEventListener('click', (e) => {
+            if (e.target === infoModal) infoModal.classList.remove('visible');
+        });
+
         // Close dialogs with Escape key
         document.addEventListener('keydown', (e) => {
             if (e.key === 'Escape') {
                 settingsModal.classList.remove('visible');
                 pianoModal.classList.remove('visible');
+                infoModal.classList.remove('visible');
             }
         });
 

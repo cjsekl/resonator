@@ -143,6 +143,11 @@ private:
     // Smoothed delay values for glide between chord modes (fixed-point, 8 bits fraction)
     int32_t smoothDelay1, smoothDelay2, smoothDelay3, smoothDelay4;
 
+    // Long-press reset detection
+    uint32_t switchDownCounter;
+    bool resetTriggered;
+    static const uint32_t RESET_HOLD_SAMPLES = 144000;  // 3 seconds at 48kHz
+
     // One-pole lowpass filter for damping
     int32_t dampingFilter(int32_t input, int32_t& state, int32_t coefficient) {
         state += (((input - state) * coefficient + 32768) >> 16);
@@ -316,7 +321,8 @@ public:
                           progressionIndex(0), lastSwitchDown(true),
                           pulseExciteEnvelope(0), noiseState(12345),
                           dcState1(0), dcState2(0), dcState3(0), dcState4(0),
-                          smoothDelay1(0), smoothDelay2(0), smoothDelay3(0), smoothDelay4(0) {
+                          smoothDelay1(0), smoothDelay2(0), smoothDelay3(0), smoothDelay4(0),
+                          switchDownCounter(0), resetTriggered(false) {
         // Try to load progression from flash, fall back to defaults
         if (!loadProgressionFromFlash()) {
             // Default progression: all chords (card works standalone without browser UI)
@@ -458,6 +464,31 @@ private:
         return true;
     }
 
+    // Reset progression to factory defaults and save to flash
+    void resetToDefaults() {
+        const ChordMode allChords[] = {
+            HARMONIC, FIFTH, MAJOR7, MINOR7, DIM, SUS4, ADD9, MAJOR10,
+            SUS2, MAJOR, MINOR, MAJOR6, DOM7, MIN9,
+            TANPURA_PA, TANPURA_MA, TANPURA_NI, TANPURA_NI_KOMAL
+        };
+
+        // Write to inactive buffer, then swap
+        int writeIdx = 1 - activeBuffer;
+        for (int i = 0; i < NUM_MODES; i++) {
+            progressionBuffers[writeIdx].chords[i] = allChords[i];
+        }
+        progressionBuffers[writeIdx].length = NUM_MODES;
+        __dmb();
+        activeBuffer = writeIdx;
+
+        // Reset to first chord
+        progressionIndex = 0;
+        currentMode = progressionBuffers[activeBuffer].chords[0];
+
+        // Save to flash
+        saveProgressionToFlash();
+    }
+
 protected:
     void ProcessSample() override {
         int16_t audioIn1 = AudioIn1();
@@ -472,13 +503,36 @@ protected:
         }
 
         // Mode switching (switch down or pulse in 2)
+        // Long press (3 sec) resets to factory defaults
         Switch switchPos = SwitchVal();
         bool switchDown = (switchPos == Down);
-        if ((switchDown && !lastSwitchDown) || PulseIn2RisingEdge()) {
+
+        if (switchDown) {
+            switchDownCounter++;
+
+            // Long press detected - reset to defaults
+            if (switchDownCounter >= RESET_HOLD_SAMPLES && !resetTriggered) {
+                resetToDefaults();
+                resetTriggered = true;
+            }
+        } else {
+            // Switch released - advance chord only if it was a short press
+            if (lastSwitchDown && !resetTriggered && switchDownCounter > 0) {
+                int bufIdx = activeBuffer;
+                progressionIndex = (progressionIndex + 1) % progressionBuffers[bufIdx].length;
+                currentMode = progressionBuffers[bufIdx].chords[progressionIndex];
+            }
+            switchDownCounter = 0;
+            resetTriggered = false;
+        }
+
+        // Pulse input also advances chord
+        if (PulseIn2RisingEdge()) {
             int bufIdx = activeBuffer;
             progressionIndex = (progressionIndex + 1) % progressionBuffers[bufIdx].length;
             currentMode = progressionBuffers[bufIdx].chords[progressionIndex];
         }
+
         lastSwitchDown = switchDown;
 
         // FREQUENCY CONTROL - 1V/oct
@@ -643,12 +697,37 @@ protected:
         // 6: 0+5, 7: 1+3, 8: 0+2, 9: 1+2
         // 10: 3+4, 11: 2+4, 12: 0+4, 13: 3+5
         // 14: 1+4, 15: 2+3, 16: 0+3, 17: 2+5
-        LedOn(0, progressionIndex == 0 || progressionIndex == 6 || progressionIndex == 8 || progressionIndex == 12 || progressionIndex == 16);
-        LedOn(1, progressionIndex == 1 || progressionIndex == 7 || progressionIndex == 9 || progressionIndex == 14);
-        LedOn(2, progressionIndex == 2 || progressionIndex == 8 || progressionIndex == 9 || progressionIndex == 11 || progressionIndex == 15 || progressionIndex == 17);
-        LedOn(3, progressionIndex == 3 || progressionIndex == 7 || progressionIndex == 10 || progressionIndex == 13 || progressionIndex == 15 || progressionIndex == 16);
-        LedOn(4, progressionIndex == 4 || progressionIndex == 10 || progressionIndex == 11 || progressionIndex == 12 || progressionIndex == 14);
-        LedOn(5, progressionIndex == 5 || progressionIndex == 6 || progressionIndex == 13 || progressionIndex == 17);
+        // LED indicators
+        // During long press: progressive fill (0->5) showing reset countdown
+        // After reset: brief flash of all LEDs
+        // Normal: show position in progression
+        if (switchDown && switchDownCounter > 0 && !resetTriggered) {
+            // Progressive LED fill during hold (6 LEDs over 3 seconds)
+            int ledsLit = (switchDownCounter * 6) / RESET_HOLD_SAMPLES;
+            LedOn(0, ledsLit >= 1);
+            LedOn(1, ledsLit >= 2);
+            LedOn(2, ledsLit >= 3);
+            LedOn(3, ledsLit >= 4);
+            LedOn(4, ledsLit >= 5);
+            LedOn(5, ledsLit >= 6);
+        } else if (resetTriggered && switchDownCounter < RESET_HOLD_SAMPLES + 24000) {
+            // Flash all LEDs for 0.5 sec after reset
+            bool flash = ((switchDownCounter / 4800) % 2) == 0;  // 10Hz blink
+            LedOn(0, flash);
+            LedOn(1, flash);
+            LedOn(2, flash);
+            LedOn(3, flash);
+            LedOn(4, flash);
+            LedOn(5, flash);
+        } else {
+            // Normal: show position in progression (0-17)
+            LedOn(0, progressionIndex == 0 || progressionIndex == 6 || progressionIndex == 8 || progressionIndex == 12 || progressionIndex == 16);
+            LedOn(1, progressionIndex == 1 || progressionIndex == 7 || progressionIndex == 9 || progressionIndex == 14);
+            LedOn(2, progressionIndex == 2 || progressionIndex == 8 || progressionIndex == 9 || progressionIndex == 11 || progressionIndex == 15 || progressionIndex == 17);
+            LedOn(3, progressionIndex == 3 || progressionIndex == 7 || progressionIndex == 10 || progressionIndex == 13 || progressionIndex == 15 || progressionIndex == 16);
+            LedOn(4, progressionIndex == 4 || progressionIndex == 10 || progressionIndex == 11 || progressionIndex == 12 || progressionIndex == 14);
+            LedOn(5, progressionIndex == 5 || progressionIndex == 6 || progressionIndex == 13 || progressionIndex == 17);
+        }
     }
 };
 
