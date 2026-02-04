@@ -13,7 +13,7 @@
 
 /**
 Resonator Workshop System Computer Card - by Johan Eklund
-version 0.3 - 2026-01-09
+version 1.1 - 2026-02-04
 
 Four resonating strings using Karplus-Strong synthesis
 */
