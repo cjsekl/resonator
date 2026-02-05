@@ -1307,16 +1307,23 @@
 
         function setProgression(ids) {
             progList.innerHTML = "";
-            ids.forEach(id => {
-                if (CHORDS.find(c => c.id === id)) {
-                    progList.appendChild(createChordTile(id, true));
-                }
-            });
+            if (ids.length === 0) {
+                const emptyMsg = document.createElement("div");
+                emptyMsg.className = "empty-msg";
+                emptyMsg.textContent = port ? "Drag chords here" : "Connect USB to load";
+                progList.appendChild(emptyMsg);
+            } else {
+                ids.forEach(id => {
+                    if (CHORDS.find(c => c.id === id)) {
+                        progList.appendChild(createChordTile(id, true));
+                    }
+                });
+            }
             updateClearBtn();
         }
 
-        // Initialize with default (all chords)
-        setProgression(CHORDS.map(c => c.id));
+        // Initialize empty (will load from device on connect)
+        setProgression([]);
 
         // ========================================
         // p5.js String Resonance Visualization
