@@ -1076,8 +1076,7 @@
         }
 
         clearBtn.addEventListener('click', () => {
-            progList.innerHTML = '';
-            updateClearBtn();
+            setProgression([]);
         });
 
         // --- Piano Modal ---
@@ -1205,6 +1204,9 @@
                 e.stopPropagation();
                 if (tile.parentElement === progList) {
                     tile.remove();
+                    if (getProgressionIds().length === 0) {
+                        setProgression([]);
+                    }
                     updateClearBtn();
                 }
             });
@@ -1264,10 +1266,12 @@
             e.preventDefault();
             clearDropIndicators();
 
+            // Remove empty message if present
+            const emptyMsg = progList.querySelector(".empty-msg");
+            if (emptyMsg) emptyMsg.remove();
+
             const chordId = parseInt(e.dataTransfer.getData("text/plain"));
             const dropIdx = getDropIndex(progList, e.clientY);
-
-            // (Visualization parameters are now controlled by sliders)
 
             if (dragFromPalette) {
                 // Copy from palette
