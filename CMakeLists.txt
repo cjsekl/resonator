@@ -37,8 +37,7 @@ target_link_libraries(resonator
     pico_unique_id
 )
 
-# Run from RAM to prevent flash access delays during audio
-pico_set_binary_type(resonator copy_to_ram)
+# Note: copy_to_ram removed - audio runs on Core 1, isolated from USB/flash on Core 0
 
 # Create map/bin/hex/uf2 files
 pico_add_extra_outputs(resonator)

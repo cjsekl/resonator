@@ -731,10 +731,16 @@ protected:
     }
 };
 
-// Global pointer for Core 1 to access shared state
+// Global pointer for cross-core access
 static ResonatingStrings* g_resonator = nullptr;
 
-void core1_serial_handler() {
+// Audio runs on Core 1 - isolated from USB interrupts and flash access
+void core1_audio_runner() {
+    g_resonator->Run();  // Blocking audio loop
+}
+
+// USB handler runs on Core 0 - where USB interrupts naturally fire
+void core0_usb_handler() {
     sleep_ms(500);  // Wait for USB to settle
 
     char lineBuf[128];
@@ -756,12 +762,17 @@ void core1_serial_handler() {
 }
 
 int main() {
-    stdio_init_all();  // Initialize USB CDC
+    stdio_init_all();  // Initialize USB CDC on Core 0
 
     static ResonatingStrings resonator;
     g_resonator = &resonator;
     resonator.EnableNormalisationProbe();
-    multicore_launch_core1(core1_serial_handler);
-    resonator.Run();
+
+    // Launch audio on Core 1 (isolated from USB/flash)
+    multicore_launch_core1(core1_audio_runner);
+
+    // Run USB handler on Core 0 (blocking)
+    core0_usb_handler();
+
     return 0;
 }
