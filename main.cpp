@@ -426,11 +426,13 @@ private:
             data[2 + i] = (uint8_t)progressionBuffers[bufIdx].chords[i];
         }
 
-        // Disable interrupts for flash operation
+        // Pause Core 0 during flash operation (XIP is blocked during erase/program)
+        multicore_lockout_start_blocking();
         uint32_t ints = save_and_disable_interrupts();
         flash_range_erase(FLASH_PROG_OFFSET, FLASH_SECTOR_SIZE);
         flash_range_program(FLASH_PROG_OFFSET, data, FLASH_PAGE_SIZE);
         restore_interrupts(ints);
+        multicore_lockout_end_blocking();
     }
 
     // Load progression from flash, returns true if valid data found
@@ -497,6 +499,7 @@ protected:
 
         // Check for serial progression update from Core 1
         if (progressionChanged) {
+            __dmb();  // Ensure we see updated buffer contents after flag
             progressionIndex = 0;
             currentMode = progressionBuffers[activeBuffer].chords[0];
             progressionChanged = false;
@@ -604,10 +607,10 @@ protected:
         int32_t frac4 = smoothDelay4 & 0xFF;
 
         // Clamp to valid range
-        if (delayLength1 < 10) delayLength1 = 10;
-        if (delayLength2 < 10) delayLength2 = 10;
-        if (delayLength3 < 10) delayLength3 = 10;
-        if (delayLength4 < 10) delayLength4 = 10;
+        if (delayLength1 < MIN_DELAY) delayLength1 = MIN_DELAY;
+        if (delayLength2 < MIN_DELAY) delayLength2 = MIN_DELAY;
+        if (delayLength3 < MIN_DELAY) delayLength3 = MIN_DELAY;
+        if (delayLength4 < MIN_DELAY) delayLength4 = MIN_DELAY;
         if (delayLength1 > MAX_DELAY_SIZE - 1) delayLength1 = MAX_DELAY_SIZE - 1;
         if (delayLength2 > MAX_DELAY_SIZE - 1) delayLength2 = MAX_DELAY_SIZE - 1;
         if (delayLength3 > MAX_DELAY_SIZE - 1) delayLength3 = MAX_DELAY_SIZE - 1;
@@ -761,6 +764,10 @@ int main() {
     static ResonatingStrings resonator;
     g_resonator = &resonator;
     resonator.EnableNormalisationProbe();
+
+    // Enable lockout handler so Core 0 can be safely paused during flash operations
+    multicore_lockout_victim_init();
+
     multicore_launch_core1(core1_serial_handler);
     resonator.Run();
     return 0;
