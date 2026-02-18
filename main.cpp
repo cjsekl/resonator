@@ -13,7 +13,7 @@
 
 /**
 Resonator Workshop System Computer Card - by Johan Eklund
-version 1.1 - 2026-02-04
+version 1.1.1 - 2026-02-18
 
 Four resonating strings using Karplus-Strong synthesis
 */
@@ -131,6 +131,7 @@ private:
     volatile int activeBuffer;
     ProgressionBuffer progressionBuffers[2];
     volatile bool progressionChanged;
+    volatile bool pendingFlashSave;  // Flag for Core 1 to save flash (Core 0 can't lock out Core 1)
     int progressionIndex;
 
     bool lastSwitchDown;
@@ -317,7 +318,7 @@ public:
     ResonatingStrings() : writeIndex1(0), writeIndex2(0), writeIndex3(0), writeIndex4(0),
                           delayLength1(100), delayLength2(150), delayLength3(200), delayLength4(400),
                           filterState1(0), filterState2(0), filterState3(0), filterState4(0),
-                          currentMode(HARMONIC), activeBuffer(0), progressionChanged(false),
+                          currentMode(HARMONIC), activeBuffer(0), progressionChanged(false), pendingFlashSave(false),
                           progressionIndex(0), lastSwitchDown(true),
                           pulseExciteEnvelope(0), noiseState(12345),
                           dcState1(0), dcState2(0), dcState3(0), dcState4(0),
@@ -345,6 +346,14 @@ public:
             delayLine2[i] = 0;
             delayLine3[i] = 0;
             delayLine4[i] = 0;
+        }
+    }
+
+    // Check and perform deferred flash save (called from Core 1)
+    void checkPendingFlashSave() {
+        if (pendingFlashSave) {
+            pendingFlashSave = false;
+            saveProgressionToFlash();
         }
     }
 
@@ -413,7 +422,7 @@ private:
         printf("\n");
     }
 
-    // Save current progression to flash
+    // Save current progression to flash (must be called from Core 1)
     void saveProgressionToFlash() {
         int bufIdx = activeBuffer;
         int len = progressionBuffers[bufIdx].length;
@@ -435,6 +444,7 @@ private:
         multicore_lockout_end_blocking();
     }
 
+private:
     // Load progression from flash, returns true if valid data found
     bool loadProgressionFromFlash() {
         // Read from flash (XIP address space)
@@ -487,8 +497,8 @@ private:
         progressionIndex = 0;
         currentMode = progressionBuffers[activeBuffer].chords[0];
 
-        // Save to flash
-        saveProgressionToFlash();
+        // Defer flash save to Core 1 (Core 0 can't lock out Core 1)
+        pendingFlashSave = true;
     }
 
 protected:
@@ -745,7 +755,11 @@ void core1_serial_handler() {
 
     while (true) {
         int c = getchar_timeout_us(10000);  // 10ms timeout
-        if (c == PICO_ERROR_TIMEOUT) continue;
+        if (c == PICO_ERROR_TIMEOUT) {
+            // Check if Core 0 requested a flash save (e.g. long-press reset)
+            g_resonator->checkPendingFlashSave();
+            continue;
+        }
         if (c == '\n' || c == '\r') {
             if (linePos > 0) {
                 lineBuf[linePos] = '\0';
