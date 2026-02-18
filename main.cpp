@@ -675,8 +675,8 @@ protected:
         int32_t resonatorOut1, resonatorOut2;
         if (SwitchVal() == Switch::Up) {
             // TUNING MODE: first string only
-            resonatorOut1 = out1 / 2;
-            resonatorOut2 = out1 / 2;
+            resonatorOut1 = out1 / 4;
+            resonatorOut2 = out1 / 4;
         } else {
             resonatorOut1 = (out1 + out2 + out3 + out4) / 4;
             resonatorOut2 = (out1 - out2 + out3 - out4) / 4;
