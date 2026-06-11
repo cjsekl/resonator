@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Resonator Chord Editor</title>
+    <title>Resonator</title>
     <script src="https://cdnjs.cloudflare.com/ajax/libs/p5.js/1.9.0/p5.min.js"></script>
     <style>
         @import url('https://fonts.googleapis.com/css2?family=EB+Garamond:ital,wght@0,400;0,500;1,400&display=swap');
@@ -361,6 +361,79 @@
             border-color: #666;
         }
 
+        /* Tab buttons */
+        .tab-btn {
+            padding: 8px 14px;
+            border: 1px solid #333;
+            border-radius: 0;
+            background: transparent;
+            color: #555;
+            cursor: pointer;
+            font-family: inherit;
+            font-size: 12px;
+            letter-spacing: 1px;
+            text-transform: uppercase;
+            transition: color 0.3s, border-color 0.3s;
+        }
+        .tab-btn:hover { color: #e0e0e0; border-color: #666; }
+        .tab-btn.active { color: #e0e0e0; border-color: #666; }
+
+        /* Outputs section */
+        #outputsContent {
+            position: relative;
+            z-index: 10;
+            max-width: 560px;
+            margin: 0 auto;
+            padding: 32px 40px;
+            font-size: 15px;
+            line-height: 1.7;
+        }
+        #outputsContent p {
+            margin-bottom: 0;
+            color: #d8d8d8;
+        }
+        #outputsContent hr {
+            border: none;
+            border-top: 1px dotted #333;
+            margin: 28px 0;
+        }
+        #outputsContent select {
+            font-family: 'EB Garamond', 'Georgia', serif;
+            font-size: 15px;
+            color: #e8a0a0;
+            background: #111;
+            border: 1px solid #e8a0a0;
+            border-radius: 0;
+            padding: 1px 4px;
+            cursor: pointer;
+            -webkit-appearance: none;
+            -moz-appearance: none;
+            appearance: none;
+            outline: none;
+        }
+        #outputsContent select:focus {
+            border-color: #ff8080;
+        }
+        #outputsContent .outputs-save-btn {
+            padding: 10px 16px;
+            border: 1px solid #333;
+            background: transparent;
+            color: #999;
+            font-family: inherit;
+            font-size: 11px;
+            font-weight: 400;
+            letter-spacing: 1px;
+            text-transform: uppercase;
+            cursor: pointer;
+            transition: color 0.3s, border-color 0.3s;
+        }
+        #outputsContent .outputs-save-btn:hover { color: #e0e0e0; border-color: #666; }
+        #outputsContent .outputs-save-btn:disabled {
+            color: #333;
+            border-color: #1a1a1a;
+            cursor: not-allowed;
+        }
+
         /* Light mode */
         body.light-mode {
             background: #fafafa;
@@ -430,15 +503,44 @@
         }
         body.light-mode #connectBtn,
         body.light-mode #settings-btn,
-        body.light-mode #info-btn {
+        body.light-mode #info-btn,
+        body.light-mode .tab-btn {
             border-color: #ccc;
             color: #666;
         }
         body.light-mode #connectBtn:hover,
         body.light-mode #settings-btn:hover,
-        body.light-mode #info-btn:hover {
+        body.light-mode #info-btn:hover,
+        body.light-mode .tab-btn:hover {
             color: #222;
             border-color: #999;
+        }
+        body.light-mode .tab-btn.active {
+            color: #222;
+            border-color: #999;
+        }
+        body.light-mode #outputsContent p {
+            color: #222;
+        }
+        body.light-mode #outputsContent hr {
+            border-top-color: #ddd;
+        }
+        body.light-mode #outputsContent select {
+            color: #c00;
+            background: #fff;
+            border-color: #c00;
+        }
+        body.light-mode #outputsContent .outputs-save-btn {
+            border-color: #ccc;
+            color: #666;
+        }
+        body.light-mode #outputsContent .outputs-save-btn:hover {
+            color: #222;
+            border-color: #999;
+        }
+        body.light-mode #outputsContent .outputs-save-btn:disabled {
+            color: #ccc;
+            border-color: #ddd;
         }
         body.light-mode .settings-dialog {
             background: #fff;
@@ -786,9 +888,13 @@
                 font-size: 16px;
                 letter-spacing: 1px;
             }
-            #connectBtn, #settings-btn, #info-btn {
+            #connectBtn, #settings-btn, #info-btn, .tab-btn {
                 padding: 6px 10px;
                 font-size: 10px;
+            }
+            #outputsContent {
+                padding: 16px 20px;
+                font-size: 14px;
             }
             .info-dialog {
                 padding: 20px;
@@ -831,7 +937,9 @@
 <body>
     <div id="canvas-container"></div>
     <header>
-        <h1>Resonator Chord Editor</h1>
+        <h1>Resonator</h1>
+        <button id="tab-chords" class="tab-btn active">chords</button>
+        <button id="tab-outputs" class="tab-btn">outputs</button>
         <button id="info-btn">?</button>
         <button id="settings-btn">⚙</button>
         <span id="status">Disconnected</span>
@@ -921,6 +1029,33 @@
         </section>
     </main>
 
+    <section id="outputsContent" style="display:none">
+        <hr>
+        <p>CV output 1 &mdash; arpeggio pitch,
+            <select id="arp-pattern">
+                <option value="0" selected>up</option>
+                <option value="1">down</option>
+                <option value="2">up-down</option>
+                <option value="3">random</option>
+            </select>
+        pattern, chord period divided into
+            <select id="arp-division">
+                <option value="1">1</option>
+                <option value="2">2</option>
+                <option value="4" selected>4</option>
+                <option value="8">8</option>
+            </select>
+        steps</p>
+        <hr>
+        <p>CV output 2 &mdash; envelope follower, tracks audio input amplitude</p>
+        <hr>
+        <p>Pulse output 1 &mdash; audio trigger, fires on input transients</p>
+        <hr>
+        <p>Pulse output 2 &mdash; chord change trigger, fires when progression advances</p>
+        <hr>
+        <button class="outputs-save-btn" id="outputs-save-btn" disabled>Save to device</button>
+    </section>
+
     <div id="piano-modal">
         <div class="piano-dialog">
             <h3 id="piano-chord-name">MAJOR</h3>
@@ -1002,9 +1137,12 @@
                 connectBtn.textContent = "Disconnect";
                 connectBtn.className = "connected";
                 sendBtn.disabled = false;
+                document.getElementById('outputs-save-btn').disabled = false;
 
                 readLoop();
                 sendCommand("GET\n");
+                sendCommand("GETARP\n");
+                sendCommand("GETPAT\n");
             } catch (e) {
                 console.error("Connection failed:", e);
             }
@@ -1023,6 +1161,7 @@
             connectBtn.textContent = "Connect USB";
             connectBtn.className = "";
             sendBtn.disabled = true;
+            document.getElementById('outputs-save-btn').disabled = true;
         }
 
         async function readLoop() {
@@ -1046,6 +1185,16 @@
             if (line.startsWith("PROG ")) {
                 const ids = line.substring(5).split(",").map(Number);
                 setProgression(ids);
+            } else if (line.startsWith("ARP ")) {
+                const val = parseInt(line.substring(4));
+                if (val === 1 || val === 2 || val === 4 || val === 8) {
+                    document.getElementById('arp-division').value = String(val);
+                }
+            } else if (line.startsWith("PAT ")) {
+                const val = parseInt(line.substring(4));
+                if (val >= 0 && val <= 3) {
+                    document.getElementById('arp-pattern').value = String(val);
+                }
             } else if (line.startsWith("ERR ")) {
                 console.error("Device error:", line.substring(4));
             }
@@ -1328,6 +1477,34 @@
 
         // Initialize empty (will load from device on connect)
         setProgression([]);
+
+        // --- Tab switching ---
+        const tabChords = document.getElementById('tab-chords');
+        const tabOutputs = document.getElementById('tab-outputs');
+        const mainContent = document.getElementById('mainContent');
+        const outputsContent = document.getElementById('outputsContent');
+        const outputsSaveBtn = document.getElementById('outputs-save-btn');
+        const arpPatternSelect = document.getElementById('arp-pattern');
+        const arpDivisionSelect = document.getElementById('arp-division');
+
+        tabChords.addEventListener('click', () => {
+            tabChords.classList.add('active');
+            tabOutputs.classList.remove('active');
+            mainContent.style.display = '';
+            outputsContent.style.display = 'none';
+        });
+
+        tabOutputs.addEventListener('click', () => {
+            tabOutputs.classList.add('active');
+            tabChords.classList.remove('active');
+            mainContent.style.display = 'none';
+            outputsContent.style.display = '';
+        });
+
+        outputsSaveBtn.addEventListener('click', () => {
+            sendCommand('SETARP ' + arpDivisionSelect.value + '\n');
+            sendCommand('SETPAT ' + arpPatternSelect.value + '\n');
+        });
 
         // ========================================
         // p5.js String Resonance Visualization

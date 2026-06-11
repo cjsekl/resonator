@@ -13,7 +13,7 @@
 
 /**
 Resonator Workshop System Computer Card - by Johan Eklund
-version 1.1.1 - 2026-02-18
+version 1.2 - 2026-05-06
 
 Four resonating strings using Karplus-Strong synthesis
 */
@@ -71,6 +71,30 @@ int32_t ExpDelay(int32_t in) {
     int32_t oct = in / 341;
     int32_t suboct = in % 341;
     return delay_vals[suboct] >> oct;
+}
+
+// Convert a just intonation ratio (num:den) to millivolt offset for 1V/oct CV
+// round(1000 * log2(num/den)) precomputed for all ratios in the chord table
+// Uses num*256+den as a collision-free key for switch lookup
+int32_t ratioToMillivolts(int num, int den) {
+    switch (num * 256 + den) {
+        case 1*256+1:   return 0;     // 1:1 unison
+        case 9*256+8:   return 170;   // 9:8 major 2nd
+        case 6*256+5:   return 263;   // 6:5 minor 3rd
+        case 5*256+4:   return 322;   // 5:4 major 3rd
+        case 4*256+3:   return 415;   // 4:3 perfect 4th
+        case 36*256+25: return 526;   // 36:25 dim 5th
+        case 3*256+2:   return 585;   // 3:2 perfect 5th
+        case 5*256+3:   return 737;   // 5:3 major 6th
+        case 9*256+5:   return 848;   // 9:5 minor 7th
+        case 15*256+8:  return 907;   // 15:8 major 7th
+        case 2*256+1:   return 1000;  // 2:1 octave
+        case 9*256+4:   return 1170;  // 9:4 major 9th
+        case 5*256+2:   return 1322;  // 5:2 major 10th
+        case 3*256+1:   return 1585;  // 3:1 octave + 5th
+        case 4*256+1:   return 2000;  // 4:1 two octaves
+        default:        return 0;
+    }
 }
 
 class ResonatingStrings : public ComputerCard
@@ -149,10 +173,42 @@ private:
     bool resetTriggered;
     static const uint32_t RESET_HOLD_SAMPLES = 144000;  // 3 seconds at 48kHz
 
+    // CV and pulse output state
+    int arpRotation;           // 0-3, current string for arpeggio output
+    int32_t envFollower;       // peak envelope tracker
+    bool triggerArmed;         // Schmitt trigger state
+    int32_t trigPulseCounter;  // audio trigger pulse countdown
+    int prevProgressionIndex;  // for chord-change detection
+    int32_t chordPulseCounter; // chord change pulse countdown
+    uint32_t chordPeriod;      // samples between chord changes
+    uint32_t chordTimer;       // sample counter since last chord change
+    uint32_t arpStepCounter;   // counts down to next arpeggio step
+    volatile int arpDivision;  // arpeggio subdivision (1, 2, 4, or 8)
+    volatile int arpPattern;   // arpeggio pattern (0=up, 1=down, 2=up-down, 3=random)
+    volatile bool arpSettingsChanged; // flag for Core 0 to reset arp state
+    int arpRandomString;       // cached random string index, updated on arp step
+
     // One-pole lowpass filter for damping
     int32_t dampingFilter(int32_t input, int32_t& state, int32_t coefficient) {
         state += (((input - state) * coefficient + 32768) >> 16);
         return state;
+    }
+
+    // Map arpRotation to a 0-3 string index based on arpPattern
+    int arpStringIndex() {
+        switch (arpPattern) {
+            default:
+            case 0: // up: 0,1,2,3
+                return arpRotation & 3;
+            case 1: // down: 3,2,1,0
+                return 3 - (arpRotation & 3);
+            case 2: { // up-down: 0,1,2,3,2,1
+                static const int updown[] = {0, 1, 2, 3, 2, 1};
+                return updown[arpRotation % 6];
+            }
+            case 3: // random: cached, updated on arp step
+                return arpRandomString;
+        }
     }
 
     // Process one string with linear interpolation for fractional delay
@@ -323,7 +379,10 @@ public:
                           pulseExciteEnvelope(0), noiseState(12345),
                           dcState1(0), dcState2(0), dcState3(0), dcState4(0),
                           smoothDelay1(0), smoothDelay2(0), smoothDelay3(0), smoothDelay4(0),
-                          switchDownCounter(0), resetTriggered(false) {
+                          switchDownCounter(0), resetTriggered(false),
+                          arpRotation(0), envFollower(0), triggerArmed(true),
+                          trigPulseCounter(0), prevProgressionIndex(0), chordPulseCounter(0),
+                          chordPeriod(0), chordTimer(0), arpStepCounter(0), arpDivision(4), arpPattern(0), arpSettingsChanged(false), arpRandomString(0) {
         // Try to load progression from flash, fall back to defaults
         if (!loadProgressionFromFlash()) {
             // Default progression: all chords (card works standalone without browser UI)
@@ -363,6 +422,14 @@ public:
             handleSet(cmd + 4);
         } else if (strcmp(cmd, "GET") == 0) {
             handleGet();
+        } else if (strncmp(cmd, "SETARP ", 7) == 0) {
+            handleSetArp(cmd + 7);
+        } else if (strcmp(cmd, "GETARP") == 0) {
+            handleGetArp();
+        } else if (strncmp(cmd, "SETPAT ", 7) == 0) {
+            handleSetPat(cmd + 7);
+        } else if (strcmp(cmd, "GETPAT") == 0) {
+            handleGetPat();
         } else {
             printf("ERR unknown_command\n");
         }
@@ -422,6 +489,48 @@ private:
         printf("\n");
     }
 
+    void handleGetArp() {
+        printf("ARP %d\n", arpDivision);
+    }
+
+    void handleSetArp(const char* args) {
+        int val = 0;
+        const char* p = args;
+        while (*p >= '0' && *p <= '9') {
+            val = val * 10 + (*p - '0');
+            p++;
+        }
+        if (val != 1 && val != 2 && val != 4 && val != 8) {
+            printf("ERR invalid_arp_division\n");
+            return;
+        }
+        arpDivision = val;
+        arpSettingsChanged = true;
+        printf("ARP %d\n", arpDivision);
+        saveProgressionToFlash();
+    }
+
+    void handleGetPat() {
+        printf("PAT %d\n", arpPattern);
+    }
+
+    void handleSetPat(const char* args) {
+        int val = 0;
+        const char* p = args;
+        while (*p >= '0' && *p <= '9') {
+            val = val * 10 + (*p - '0');
+            p++;
+        }
+        if (val < 0 || val > 3) {
+            printf("ERR invalid_arp_pattern\n");
+            return;
+        }
+        arpPattern = val;
+        arpSettingsChanged = true;
+        printf("PAT %d\n", arpPattern);
+        saveProgressionToFlash();
+    }
+
     // Save current progression to flash (must be called from Core 1)
     void saveProgressionToFlash() {
         int bufIdx = activeBuffer;
@@ -434,6 +543,8 @@ private:
         for (int i = 0; i < len && i < MAX_PROGRESSION_LENGTH; i++) {
             data[2 + i] = (uint8_t)progressionBuffers[bufIdx].chords[i];
         }
+        data[20] = (uint8_t)arpDivision;
+        data[21] = (uint8_t)arpPattern;
 
         // Pause Core 0 during flash operation (XIP is blocked during erase/program)
         multicore_lockout_start_blocking();
@@ -473,6 +584,22 @@ private:
         progressionBuffers[0].length = len;
         progressionBuffers[1].length = len;
 
+        // Load arp division (byte 20), default to 4 if invalid (old flash has 0x00)
+        uint8_t arpVal = flash_data[20];
+        if (arpVal == 1 || arpVal == 2 || arpVal == 4 || arpVal == 8) {
+            arpDivision = arpVal;
+        } else {
+            arpDivision = 4;
+        }
+
+        // Load arp pattern (byte 21), default to 0 if invalid (old flash has 0x00)
+        uint8_t patVal = flash_data[21];
+        if (patVal <= 3) {
+            arpPattern = patVal;
+        } else {
+            arpPattern = 0;
+        }
+
         return true;
     }
 
@@ -496,6 +623,8 @@ private:
         // Reset to first chord
         progressionIndex = 0;
         currentMode = progressionBuffers[activeBuffer].chords[0];
+        arpDivision = 4;
+        arpPattern = 0;
 
         // Defer flash save to Core 1 (Core 0 can't lock out Core 1)
         pendingFlashSave = true;
@@ -703,6 +832,95 @@ protected:
         // Stereo output
         AudioOut1((int16_t)mixedOutput1);
         AudioOut2((int16_t)mixedOutput2);
+
+        // --- CV and Pulse outputs ---
+
+        // Pulse Out 2: chord change trigger
+        chordTimer++;
+        if (arpSettingsChanged) {
+            arpSettingsChanged = false;
+            arpRotation = 0;
+            if (chordPeriod > 0) {
+                arpStepCounter = chordPeriod / arpDivision;
+            }
+        }
+        if (progressionIndex != prevProgressionIndex) {
+            chordPulseCounter = 240;  // 5ms at 48kHz
+            chordPeriod = chordTimer;
+            chordTimer = 0;
+            prevProgressionIndex = progressionIndex;
+            arpRotation = 0;                          // reset to string 0 on chord change
+            noiseState = noiseState * 1103515245 + 12345;
+            arpRandomString = (noiseState >> 16) & 3;
+            arpStepCounter = chordPeriod / arpDivision; // schedule next step
+        }
+        // Subdivide chord period into arpDivision steps
+        if (chordPeriod > 0 && arpStepCounter > 0) {
+            arpStepCounter--;
+            if (arpStepCounter == 0 && arpRotation < (arpDivision - 1)) {
+                arpRotation++;
+                noiseState = noiseState * 1103515245 + 12345;
+                arpRandomString = (noiseState >> 16) & 3;
+                arpStepCounter = chordPeriod / arpDivision;
+            }
+        }
+        if (chordPulseCounter > 0) {
+            PulseOut2(true);
+            chordPulseCounter--;
+        } else {
+            PulseOut2(false);
+        }
+
+        // Audio amplitude for trigger and envelope detection
+        // Use peak of both inputs (not the averaged audioIn) for full sensitivity
+        int32_t abs1 = audioIn1 < 0 ? -audioIn1 : audioIn1;
+        int32_t abs2 = audioIn2 < 0 ? -audioIn2 : audioIn2;
+        int32_t audioAbs = abs1 > abs2 ? abs1 : abs2;
+
+        // Pulse Out 1: Schmitt trigger with retrigger lockout
+        if (trigPulseCounter > 0) {
+            PulseOut1(trigPulseCounter > 2400 - 240);  // 5ms pulse at start of 50ms lockout
+            trigPulseCounter--;
+        } else {
+            PulseOut1(false);
+            if (triggerArmed && audioAbs > 200) {
+                triggerArmed = false;
+                trigPulseCounter = 2400;  // 50ms lockout (includes 5ms pulse)
+            }
+            if (!triggerArmed && audioAbs < 80) {
+                triggerArmed = true;
+            }
+        }
+
+        // CV Out 2: envelope follower tracking resonator output
+        {
+            int32_t resAbs = resonatorOut1 < 0 ? -resonatorOut1 : resonatorOut1;
+            int32_t target = resAbs << 16;
+            if (target > envFollower) {
+                envFollower += (target - envFollower) >> 5;   // fast attack: tau=32 samples
+            } else {
+                envFollower -= (envFollower - target) >> 12;  // slow release: tau=4096 samples
+            }
+            CVOut2((int16_t)(envFollower >> 16));
+        }
+
+        // CV Out 1: rotating arpeggio pitch
+        {
+            // Root millivolts: pitchCV mapped to 1V/oct with C4 = 0V
+            int32_t rootMV = (pitchCV - 3069) * 1000 / 341;
+
+            // Get millivolt offset for current arpeggio string
+            int ratioMV;
+            switch (arpStringIndex()) {
+                case 0: ratioMV = ratioToMillivolts(num1, den1); break;
+                case 1: ratioMV = ratioToMillivolts(num2, den2); break;
+                case 2: ratioMV = ratioToMillivolts(num3, den3); break;
+                case 3: ratioMV = ratioToMillivolts(num4, den4); break;
+                default: ratioMV = 0; break;
+            }
+
+            CVOut1Millivolts(rootMV + ratioMV);
+        }
 
         // LED indicators - show position in progression (0-17)
         // Single LED: positions 0-5
