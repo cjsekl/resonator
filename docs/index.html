@@ -414,6 +414,8 @@
         #outputsContent select:focus {
             border-color: #ff8080;
         }
+        #outputsContent .mode-desc {
+        }
         #outputsContent .outputs-save-btn {
             padding: 10px 16px;
             border: 1px solid #333;
@@ -529,6 +531,8 @@
             color: #c00;
             background: #fff;
             border-color: #c00;
+        }
+        body.light-mode #outputsContent .mode-desc {
         }
         body.light-mode #outputsContent .outputs-save-btn {
             border-color: #ccc;
@@ -939,7 +943,7 @@
     <header>
         <h1>Resonator</h1>
         <button id="tab-chords" class="tab-btn active">chords</button>
-        <button id="tab-outputs" class="tab-btn">outputs</button>
+        <button id="tab-outputs" class="tab-btn">i/o</button>
         <button id="info-btn">?</button>
         <button id="settings-btn">⚙</button>
         <span id="status">Disconnected</span>
@@ -1031,7 +1035,17 @@
 
     <section id="outputsContent" style="display:none">
         <hr>
-        <p>CV output 1 &mdash; arpeggio pitch,
+        <p>CV output 1 &mdash;
+            <select id="cv1-mode">
+                <option value="0" selected>arpeggio pitch</option>
+                <option value="1">root pitch</option>
+                <option value="2">envelope follower</option>
+                <option value="3">random S&amp;H</option>
+                <option value="4">pitch S&amp;H</option>
+            </select>
+            <span class="mode-desc" id="cv1-desc"></span>
+        </p>
+        <p id="arp-settings-row" style="margin-top:4px">
             <select id="arp-pattern">
                 <option value="0" selected>up</option>
                 <option value="1">down</option>
@@ -1047,11 +1061,65 @@
             </select>
         steps</p>
         <hr>
-        <p>CV output 2 &mdash; envelope follower, tracks audio input amplitude</p>
+        <p>CV output 2 &mdash;
+            <select id="cv2-mode">
+                <option value="0" selected>resonator envelope</option>
+                <option value="1">input envelope</option>
+                <option value="2">arpeggio pitch</option>
+                <option value="3">root pitch</option>
+            </select>
+            <span class="mode-desc" id="cv2-desc"></span>
+        </p>
         <hr>
-        <p>Pulse output 1 &mdash; audio trigger, fires on input transients</p>
+        <p>Pulse output 1 &mdash;
+            <select id="p1-mode">
+                <option value="0" selected>audio trigger</option>
+                <option value="1">tap tempo clock</option>
+                <option value="2">arpeggio clock</option>
+                <option value="3">onset detect</option>
+            </select>
+            <span class="mode-desc" id="p1-desc"></span>
+        </p>
         <hr>
-        <p>Pulse output 2 &mdash; chord change trigger, fires when progression advances</p>
+        <p>Pulse output 2 &mdash;
+            <select id="p2-mode">
+                <option value="0" selected>chord change trigger</option>
+                <option value="1">tap tempo clock</option>
+                <option value="2">audio trigger</option>
+                <option value="3">arpeggio clock</option>
+                <option value="4">clock divider</option>
+                <option value="5">onset detect</option>
+            </select>
+            <span class="mode-desc" id="p2-desc"></span>
+        </p>
+        <p id="clk-div-row" style="margin-top:4px;display:none">
+            divide by
+            <select id="clk-div-ratio">
+                <option value="2" selected>2</option>
+                <option value="3">3</option>
+                <option value="4">4</option>
+                <option value="8">8</option>
+            </select>
+        </p>
+        <hr>
+        <p>Pulse input 1 &mdash;
+            <select id="pi1-mode">
+                <option value="0" selected>noise burst / pluck</option>
+                <option value="1">advance chord</option>
+                <option value="2">reset to first chord</option>
+            </select>
+            <span class="mode-desc" id="pi1-desc"></span>
+        </p>
+        <hr>
+        <p>Pulse input 2 &mdash;
+            <select id="pi2-mode">
+                <option value="0" selected>advance chord</option>
+                <option value="1">advance arp step</option>
+                <option value="2">noise burst / pluck</option>
+                <option value="3">reset to first chord</option>
+            </select>
+            <span class="mode-desc" id="pi2-desc"></span>
+        </p>
         <hr>
         <button class="outputs-save-btn" id="outputs-save-btn" disabled>Save to device</button>
     </section>
@@ -1143,6 +1211,8 @@
                 sendCommand("GET\n");
                 sendCommand("GETARP\n");
                 sendCommand("GETPAT\n");
+                sendCommand("GETOUT\n");
+                sendCommand("GETDIV\n");
             } catch (e) {
                 console.error("Connection failed:", e);
             }
@@ -1194,6 +1264,22 @@
                 const val = parseInt(line.substring(4));
                 if (val >= 0 && val <= 3) {
                     document.getElementById('arp-pattern').value = String(val);
+                }
+            } else if (line.startsWith("OUT ")) {
+                const vals = line.substring(4).split(",").map(Number);
+                if (vals.length === 6) {
+                    document.getElementById('cv1-mode').value = String(vals[0]);
+                    document.getElementById('cv2-mode').value = String(vals[1]);
+                    document.getElementById('p1-mode').value = String(vals[2]);
+                    document.getElementById('p2-mode').value = String(vals[3]);
+                    document.getElementById('pi1-mode').value = String(vals[4]);
+                    document.getElementById('pi2-mode').value = String(vals[5]);
+                    updateConditionalRows();
+                }
+            } else if (line.startsWith("DIV ")) {
+                const val = parseInt(line.substring(4));
+                if (val === 2 || val === 3 || val === 4 || val === 8) {
+                    document.getElementById('clk-div-ratio').value = String(val);
                 }
             } else if (line.startsWith("ERR ")) {
                 console.error("Device error:", line.substring(4));
@@ -1504,7 +1590,100 @@
         outputsSaveBtn.addEventListener('click', () => {
             sendCommand('SETARP ' + arpDivisionSelect.value + '\n');
             sendCommand('SETPAT ' + arpPatternSelect.value + '\n');
+            const cv1 = document.getElementById('cv1-mode').value;
+            const cv2 = document.getElementById('cv2-mode').value;
+            const p1 = document.getElementById('p1-mode').value;
+            const p2 = document.getElementById('p2-mode').value;
+            const pi1 = document.getElementById('pi1-mode').value;
+            const pi2 = document.getElementById('pi2-mode').value;
+            sendCommand('SETOUT ' + [cv1,cv2,p1,p2,pi1,pi2].join(',') + '\n');
+            sendCommand('SETDIV ' + document.getElementById('clk-div-ratio').value + '\n');
         });
+
+        // Description text for each mode
+        const modeDescs = {
+            cv1: [
+                'rotating chord tones as 1V/oct CV',
+                'fundamental pitch only, tracks pitch knob and CV input',
+                'tracks resonator output amplitude',
+                'random voltage, new value on each chord change',
+                'samples CV input 1 on pulse input 1 trigger, holds until next trigger'
+            ],
+            cv2: [
+                'tracks resonator output amplitude',
+                'tracks raw audio input amplitude',
+                'rotating chord tones as 1V/oct CV',
+                'fundamental pitch only, tracks pitch knob and CV input'
+            ],
+            p1: [
+                'Schmitt trigger on input transients, 5ms pulse with 50ms lockout',
+                'free-running clock at the chord-change rate',
+                'pulse on each arpeggio step change',
+                'fires on note onsets, works with sustained instruments like guitar'
+            ],
+            p2: [
+                'fires when progression advances',
+                'free-running clock at the chord-change rate',
+                'Schmitt trigger on input transients, 5ms pulse with 50ms lockout',
+                'pulse on each arpeggio step change',
+                'divides pulse input 2 by a selectable ratio',
+                'fires on note onsets, works with sustained instruments like guitar'
+            ],
+            pi1: [
+                'excites all four strings with a decaying noise burst',
+                'steps to the next chord in the progression',
+                'jumps back to the first chord in the progression'
+            ],
+            pi2: [
+                'steps to the next chord in the progression',
+                'advances the arpeggio to the next chord tone',
+                'excites all four strings with a decaying noise burst',
+                'jumps back to the first chord in the progression'
+            ]
+        };
+
+        // Conditional row visibility and description updates
+        function updateConditionalRows() {
+            const cv1 = document.getElementById('cv1-mode').value;
+            const cv2 = document.getElementById('cv2-mode').value;
+            const p1 = document.getElementById('p1-mode').value;
+            const p2 = document.getElementById('p2-mode').value;
+            const pi1 = document.getElementById('pi1-mode').value;
+            const pi2 = document.getElementById('pi2-mode').value;
+
+            // Show arp settings when either CV output is set to arpeggio pitch
+            const showArp = (cv1 === '0') || (cv2 === '2');
+            document.getElementById('arp-settings-row').style.display = showArp ? '' : 'none';
+            // Show clock divider ratio when P2 is set to clock divider
+            document.getElementById('clk-div-row').style.display = (p2 === '4') ? '' : 'none';
+
+            // Update description text
+            document.getElementById('cv1-desc').textContent = modeDescs.cv1[cv1] || '';
+            document.getElementById('cv2-desc').textContent = modeDescs.cv2[cv2] || '';
+            document.getElementById('p1-desc').textContent = modeDescs.p1[p1] || '';
+            document.getElementById('p2-desc').textContent = modeDescs.p2[p2] || '';
+            document.getElementById('pi1-desc').textContent = modeDescs.pi1[pi1] || '';
+            document.getElementById('pi2-desc').textContent = modeDescs.pi2[pi2] || '';
+        }
+
+        function onModeChange(e) {
+            updateConditionalRows();
+            if (window.triggerResonance) {
+                const rect = e.target.getBoundingClientRect();
+                window.triggerResonance(rect.left + rect.width / 2, rect.top + rect.height / 2);
+            }
+        }
+
+        document.getElementById('cv1-mode').addEventListener('change', onModeChange);
+        document.getElementById('cv2-mode').addEventListener('change', onModeChange);
+        document.getElementById('p1-mode').addEventListener('change', onModeChange);
+        document.getElementById('p2-mode').addEventListener('change', onModeChange);
+        document.getElementById('pi1-mode').addEventListener('change', onModeChange);
+        document.getElementById('pi2-mode').addEventListener('change', onModeChange);
+        document.getElementById('arp-pattern').addEventListener('change', onModeChange);
+        document.getElementById('arp-division').addEventListener('change', onModeChange);
+        document.getElementById('clk-div-ratio').addEventListener('change', onModeChange);
+        updateConditionalRows();
 
         // ========================================
         // p5.js String Resonance Visualization

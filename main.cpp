@@ -97,6 +97,14 @@ int32_t ratioToMillivolts(int num, int den) {
     }
 }
 
+// Output mode enums
+enum CV1Mode  { CV1_ARP=0, CV1_ROOT, CV1_ENVELOPE, CV1_RANDOM_SH, CV1_PITCH_SH };
+enum CV2Mode  { CV2_RES_ENV=0, CV2_IN_ENV, CV2_ARP, CV2_ROOT };
+enum P1Mode   { P1_AUDIO_TRIG=0, P1_TAP_CLOCK, P1_ARP_CLOCK, P1_ONSET };
+enum P2Mode   { P2_CHORD_TRIG=0, P2_TAP_CLOCK, P2_AUDIO_TRIG, P2_ARP_CLOCK, P2_CLK_DIV, P2_ONSET };
+enum PI1Mode  { PI1_PLUCK=0, PI1_ADVANCE, PI1_RESET };
+enum PI2Mode  { PI2_ADVANCE=0, PI2_ARP_STEP, PI2_PLUCK, PI2_RESET };
+
 class ResonatingStrings : public ComputerCard
 {
 private:
@@ -187,6 +195,40 @@ private:
     volatile int arpPattern;   // arpeggio pattern (0=up, 1=down, 2=up-down, 3=random)
     volatile bool arpSettingsChanged; // flag for Core 0 to reset arp state
     int arpRandomString;       // cached random string index, updated on arp step
+
+    // Configurable I/O modes
+    volatile int cv1Mode;      // CV1Mode enum
+    volatile int cv2Mode;      // CV2Mode enum
+    volatile int p1Mode;       // P1Mode enum
+    volatile int p2Mode;       // P2Mode enum
+    volatile int pi1Mode;      // PI1Mode enum
+    volatile int pi2Mode;      // PI2Mode enum
+    volatile bool outputModesChanged;
+
+    // Tap tempo clock state
+    uint32_t clockCounter;     // counts up, wraps at chordPeriod
+    int32_t tapClockPulseCounter; // 5ms pulse countdown
+
+    // Random S&H state
+    int32_t randomSHValue;     // millivolts, updated on chord change
+
+    // Arp clock state
+    int32_t arpClockPulseCounter; // 5ms pulse countdown
+
+    // Pitch S&H state
+    int32_t pitchSHValue;      // millivolts, updated on PulseIn1 rising edge
+
+    // Clock divider state
+    uint32_t clockDivCount;    // counts PulseIn2 rising edges
+    volatile int clockDivRatio; // 2, 3, 4, or 8
+    int32_t clockDivPulseCounter; // output pulse countdown
+
+    // Input envelope follower (for CV2 input envelope mode)
+    int32_t inputEnvFollower;
+
+    // Onset detector state
+    int32_t onsetEnvelope;       // slow-tracking baseline envelope (fixed-point <<16)
+    int32_t onsetPulseCounter;   // pulse + lockout countdown
 
     // One-pole lowpass filter for damping
     int32_t dampingFilter(int32_t input, int32_t& state, int32_t coefficient) {
@@ -382,7 +424,14 @@ public:
                           switchDownCounter(0), resetTriggered(false),
                           arpRotation(0), envFollower(0), triggerArmed(true),
                           trigPulseCounter(0), prevProgressionIndex(0), chordPulseCounter(0),
-                          chordPeriod(0), chordTimer(0), arpStepCounter(0), arpDivision(4), arpPattern(0), arpSettingsChanged(false), arpRandomString(0) {
+                          chordPeriod(0), chordTimer(0), arpStepCounter(0), arpDivision(4), arpPattern(0), arpSettingsChanged(false), arpRandomString(0),
+                          cv1Mode(CV1_ARP), cv2Mode(CV2_RES_ENV), p1Mode(P1_AUDIO_TRIG), p2Mode(P2_CHORD_TRIG),
+                          pi1Mode(PI1_PLUCK), pi2Mode(PI2_ADVANCE), outputModesChanged(false),
+                          clockCounter(0), tapClockPulseCounter(0),
+                          randomSHValue(0), arpClockPulseCounter(0),
+                          pitchSHValue(0), clockDivCount(0), clockDivRatio(2), clockDivPulseCounter(0),
+                          inputEnvFollower(0),
+                          onsetEnvelope(0), onsetPulseCounter(0) {
         // Try to load progression from flash, fall back to defaults
         if (!loadProgressionFromFlash()) {
             // Default progression: all chords (card works standalone without browser UI)
@@ -430,6 +479,14 @@ public:
             handleSetPat(cmd + 7);
         } else if (strcmp(cmd, "GETPAT") == 0) {
             handleGetPat();
+        } else if (strncmp(cmd, "SETOUT ", 7) == 0) {
+            handleSetOut(cmd + 7);
+        } else if (strcmp(cmd, "GETOUT") == 0) {
+            handleGetOut();
+        } else if (strncmp(cmd, "SETDIV ", 7) == 0) {
+            handleSetDiv(cmd + 7);
+        } else if (strcmp(cmd, "GETDIV") == 0) {
+            handleGetDiv();
         } else {
             printf("ERR unknown_command\n");
         }
@@ -531,6 +588,71 @@ private:
         saveProgressionToFlash();
     }
 
+    void handleGetOut() {
+        printf("OUT %d,%d,%d,%d,%d,%d\n", (int)cv1Mode, (int)cv2Mode, (int)p1Mode, (int)p2Mode, (int)pi1Mode, (int)pi2Mode);
+    }
+
+    void handleSetOut(const char* args) {
+        int vals[6];
+        int count = 0;
+        const char* p = args;
+        while (*p && count < 6) {
+            int val = 0;
+            bool hasDigit = false;
+            while (*p >= '0' && *p <= '9') {
+                val = val * 10 + (*p - '0');
+                p++;
+                hasDigit = true;
+            }
+            if (!hasDigit) break;
+            vals[count++] = val;
+            if (*p == ',') p++;
+        }
+        if (count != 6) {
+            printf("ERR invalid_out_args\n");
+            return;
+        }
+        // Validate ranges
+        if (vals[0] < 0 || vals[0] > 4 ||
+            vals[1] < 0 || vals[1] > 3 ||
+            vals[2] < 0 || vals[2] > 3 ||
+            vals[3] < 0 || vals[3] > 5 ||
+            vals[4] < 0 || vals[4] > 2 ||
+            vals[5] < 0 || vals[5] > 3) {
+            printf("ERR invalid_out_mode\n");
+            return;
+        }
+        cv1Mode = vals[0];
+        cv2Mode = vals[1];
+        p1Mode = vals[2];
+        p2Mode = vals[3];
+        pi1Mode = vals[4];
+        pi2Mode = vals[5];
+        outputModesChanged = true;
+        handleGetOut();
+        saveProgressionToFlash();
+    }
+
+    void handleGetDiv() {
+        printf("DIV %d\n", (int)clockDivRatio);
+    }
+
+    void handleSetDiv(const char* args) {
+        int val = 0;
+        const char* p = args;
+        while (*p >= '0' && *p <= '9') {
+            val = val * 10 + (*p - '0');
+            p++;
+        }
+        if (val != 2 && val != 3 && val != 4 && val != 8) {
+            printf("ERR invalid_div_ratio\n");
+            return;
+        }
+        clockDivRatio = val;
+        printf("DIV %d\n", (int)clockDivRatio);
+        saveProgressionToFlash();
+    }
+
     // Save current progression to flash (must be called from Core 1)
     void saveProgressionToFlash() {
         int bufIdx = activeBuffer;
@@ -545,6 +667,13 @@ private:
         }
         data[20] = (uint8_t)arpDivision;
         data[21] = (uint8_t)arpPattern;
+        data[22] = (uint8_t)cv1Mode;
+        data[23] = (uint8_t)cv2Mode;
+        data[24] = (uint8_t)p1Mode;
+        data[25] = (uint8_t)p2Mode;
+        data[26] = (uint8_t)pi1Mode;
+        data[27] = (uint8_t)pi2Mode;
+        data[28] = (uint8_t)clockDivRatio;
 
         // Pause Core 0 during flash operation (XIP is blocked during erase/program)
         multicore_lockout_start_blocking();
@@ -600,6 +729,28 @@ private:
             arpPattern = 0;
         }
 
+        // Load output modes (bytes 22-27), default to 0 if invalid (old flash)
+        uint8_t cv1Val = flash_data[22];
+        cv1Mode = (cv1Val <= 4) ? cv1Val : 0;
+        uint8_t cv2Val = flash_data[23];
+        cv2Mode = (cv2Val <= 3) ? cv2Val : 0;
+        uint8_t p1Val = flash_data[24];
+        p1Mode = (p1Val <= 3) ? p1Val : 0;
+        uint8_t p2Val = flash_data[25];
+        p2Mode = (p2Val <= 5) ? p2Val : 0;
+        uint8_t pi1Val = flash_data[26];
+        pi1Mode = (pi1Val <= 2) ? pi1Val : 0;
+        uint8_t pi2Val = flash_data[27];
+        pi2Mode = (pi2Val <= 3) ? pi2Val : 0;
+
+        // Load clock divider ratio (byte 28), default to 2 if invalid
+        uint8_t divVal = flash_data[28];
+        if (divVal == 2 || divVal == 3 || divVal == 4 || divVal == 8) {
+            clockDivRatio = divVal;
+        } else {
+            clockDivRatio = 2;
+        }
+
         return true;
     }
 
@@ -625,6 +776,13 @@ private:
         currentMode = progressionBuffers[activeBuffer].chords[0];
         arpDivision = 4;
         arpPattern = 0;
+        cv1Mode = CV1_ARP;
+        cv2Mode = CV2_RES_ENV;
+        p1Mode = P1_AUDIO_TRIG;
+        p2Mode = P2_CHORD_TRIG;
+        pi1Mode = PI1_PLUCK;
+        pi2Mode = PI2_ADVANCE;
+        clockDivRatio = 2;
 
         // Defer flash save to Core 1 (Core 0 can't lock out Core 1)
         pendingFlashSave = true;
@@ -668,11 +826,51 @@ protected:
             resetTriggered = false;
         }
 
-        // Pulse input also advances chord
-        if (PulseIn2RisingEdge()) {
-            int bufIdx = activeBuffer;
-            progressionIndex = (progressionIndex + 1) % progressionBuffers[bufIdx].length;
-            currentMode = progressionBuffers[bufIdx].chords[progressionIndex];
+        // Pulse input handling (mode-based)
+        bool pulseIn1Rising = PulseIn1RisingEdge();
+        bool pulseIn2Rising = PulseIn2RisingEdge();
+
+        // Pulse In 1 dispatch
+        if (pulseIn1Rising) {
+            switch (pi1Mode) {
+                case PI1_PLUCK:
+                    pulseExciteEnvelope = 2048;
+                    break;
+                case PI1_ADVANCE: {
+                    int bufIdx = activeBuffer;
+                    progressionIndex = (progressionIndex + 1) % progressionBuffers[bufIdx].length;
+                    currentMode = progressionBuffers[bufIdx].chords[progressionIndex];
+                    break;
+                }
+                case PI1_RESET:
+                    progressionIndex = 0;
+                    currentMode = progressionBuffers[activeBuffer].chords[0];
+                    break;
+            }
+        }
+
+        // Pulse In 2 dispatch
+        if (pulseIn2Rising) {
+            switch (pi2Mode) {
+                case PI2_ADVANCE: {
+                    int bufIdx = activeBuffer;
+                    progressionIndex = (progressionIndex + 1) % progressionBuffers[bufIdx].length;
+                    currentMode = progressionBuffers[bufIdx].chords[progressionIndex];
+                    break;
+                }
+                case PI2_ARP_STEP:
+                    arpRotation++;
+                    noiseState = noiseState * 1103515245 + 12345;
+                    arpRandomString = (noiseState >> 16) & 3;
+                    break;
+                case PI2_PLUCK:
+                    pulseExciteEnvelope = 2048;
+                    break;
+                case PI2_RESET:
+                    progressionIndex = 0;
+                    currentMode = progressionBuffers[activeBuffer].chords[0];
+                    break;
+            }
         }
 
         lastSwitchDown = switchDown;
@@ -770,11 +968,6 @@ protected:
         int32_t excitation3 = audioIn >> 4;  // Sympathetic response
         int32_t excitation4 = audioIn >> 3;  // 4th string
 
-        // Pulse1 triggers a noise burst to excite strings (like plucking)
-        if (PulseIn1RisingEdge()) {
-            pulseExciteEnvelope = 2048;  // Start excitation envelope
-        }
-
         // Apply decaying noise burst while envelope is active
         if (pulseExciteEnvelope > 10) {
             noiseState = noiseState * 1103515245 + 12345;
@@ -835,7 +1028,7 @@ protected:
 
         // --- CV and Pulse outputs ---
 
-        // Pulse Out 2: chord change trigger
+        // Common signal computation
         chordTimer++;
         if (arpSettingsChanged) {
             arpSettingsChanged = false;
@@ -844,45 +1037,52 @@ protected:
                 arpStepCounter = chordPeriod / arpDivision;
             }
         }
-        if (progressionIndex != prevProgressionIndex) {
+
+        bool chordChanged = (progressionIndex != prevProgressionIndex);
+        bool arpStepped = false;
+
+        if (chordChanged) {
             chordPulseCounter = 240;  // 5ms at 48kHz
             chordPeriod = chordTimer;
             chordTimer = 0;
             prevProgressionIndex = progressionIndex;
-            arpRotation = 0;                          // reset to string 0 on chord change
+            arpRotation = 0;
             noiseState = noiseState * 1103515245 + 12345;
             arpRandomString = (noiseState >> 16) & 3;
-            arpStepCounter = chordPeriod / arpDivision; // schedule next step
+            arpStepCounter = chordPeriod / arpDivision;
+            // Random S&H: new random value on chord change
+            noiseState = noiseState * 1103515245 + 12345;
+            randomSHValue = ((int32_t)((noiseState >> 16) & 0xFFF) - 2048) * 1000 / 341;
+            // Reset tap tempo clock
+            clockCounter = 0;
         }
+
         // Subdivide chord period into arpDivision steps
         if (chordPeriod > 0 && arpStepCounter > 0) {
             arpStepCounter--;
             if (arpStepCounter == 0 && arpRotation < (arpDivision - 1)) {
                 arpRotation++;
+                arpStepped = true;
                 noiseState = noiseState * 1103515245 + 12345;
                 arpRandomString = (noiseState >> 16) & 3;
                 arpStepCounter = chordPeriod / arpDivision;
             }
         }
-        if (chordPulseCounter > 0) {
-            PulseOut2(true);
-            chordPulseCounter--;
-        } else {
-            PulseOut2(false);
+
+        // Pitch S&H: capture CV In 1 on Pulse In 1 rising edge (when in pitch S&H mode)
+        if (pulseIn1Rising && cv1Mode == CV1_PITCH_SH) {
+            pitchSHValue = (pitchCV - 3069) * 1000 / 341;
         }
 
         // Audio amplitude for trigger and envelope detection
-        // Use peak of both inputs (not the averaged audioIn) for full sensitivity
         int32_t abs1 = audioIn1 < 0 ? -audioIn1 : audioIn1;
         int32_t abs2 = audioIn2 < 0 ? -audioIn2 : audioIn2;
         int32_t audioAbs = abs1 > abs2 ? abs1 : abs2;
 
-        // Pulse Out 1: Schmitt trigger with retrigger lockout
+        // Schmitt trigger detection (always computed, used by P1 and P2 audio trigger modes)
         if (trigPulseCounter > 0) {
-            PulseOut1(trigPulseCounter > 2400 - 240);  // 5ms pulse at start of 50ms lockout
             trigPulseCounter--;
         } else {
-            PulseOut1(false);
             if (triggerArmed && audioAbs > 200) {
                 triggerArmed = false;
                 trigPulseCounter = 2400;  // 50ms lockout (includes 5ms pulse)
@@ -891,35 +1091,130 @@ protected:
                 triggerArmed = true;
             }
         }
+        bool audioTrigOut = (trigPulseCounter > 2400 - 240);  // 5ms pulse at start of lockout
 
-        // CV Out 2: envelope follower tracking resonator output
+        // Onset detector: fires on rapid amplitude rises above a slow baseline
+        {
+            int32_t target = audioAbs << 16;
+            if (target > onsetEnvelope) {
+                onsetEnvelope += (target - onsetEnvelope) >> 8;   // moderate attack (tau ~256 samples)
+            } else {
+                onsetEnvelope -= (onsetEnvelope - target) >> 12;  // slow release (tau ~4096 samples)
+            }
+            if (onsetPulseCounter > 0) {
+                onsetPulseCounter--;
+            } else if (target > onsetEnvelope + (200 << 16)) {
+                onsetPulseCounter = 2400;  // 50ms lockout (includes 5ms pulse)
+                onsetEnvelope = target;    // snap baseline up to prevent re-trigger
+            }
+        }
+        bool onsetTrigOut = (onsetPulseCounter > 2400 - 240);  // 5ms pulse at start
+
+        // Chord change pulse
+        if (chordPulseCounter > 0) chordPulseCounter--;
+        bool chordTrigOut = (chordPulseCounter > 0);
+
+        // Resonator envelope follower
         {
             int32_t resAbs = resonatorOut1 < 0 ? -resonatorOut1 : resonatorOut1;
             int32_t target = resAbs << 16;
             if (target > envFollower) {
-                envFollower += (target - envFollower) >> 5;   // fast attack: tau=32 samples
+                envFollower += (target - envFollower) >> 5;
             } else {
-                envFollower -= (envFollower - target) >> 12;  // slow release: tau=4096 samples
+                envFollower -= (envFollower - target) >> 12;
             }
-            CVOut2((int16_t)(envFollower >> 16));
         }
 
-        // CV Out 1: rotating arpeggio pitch
+        // Input envelope follower
         {
-            // Root millivolts: pitchCV mapped to 1V/oct with C4 = 0V
-            int32_t rootMV = (pitchCV - 3069) * 1000 / 341;
-
-            // Get millivolt offset for current arpeggio string
-            int ratioMV;
-            switch (arpStringIndex()) {
-                case 0: ratioMV = ratioToMillivolts(num1, den1); break;
-                case 1: ratioMV = ratioToMillivolts(num2, den2); break;
-                case 2: ratioMV = ratioToMillivolts(num3, den3); break;
-                case 3: ratioMV = ratioToMillivolts(num4, den4); break;
-                default: ratioMV = 0; break;
+            int32_t target = audioAbs << 16;
+            if (target > inputEnvFollower) {
+                inputEnvFollower += (target - inputEnvFollower) >> 5;
+            } else {
+                inputEnvFollower -= (inputEnvFollower - target) >> 12;
             }
+        }
 
-            CVOut1Millivolts(rootMV + ratioMV);
+        // Arp pitch (millivolts)
+        int32_t rootMV = (pitchCV - 3069) * 1000 / 341;
+        int ratioMV;
+        switch (arpStringIndex()) {
+            case 0: ratioMV = ratioToMillivolts(num1, den1); break;
+            case 1: ratioMV = ratioToMillivolts(num2, den2); break;
+            case 2: ratioMV = ratioToMillivolts(num3, den3); break;
+            case 3: ratioMV = ratioToMillivolts(num4, den4); break;
+            default: ratioMV = 0; break;
+        }
+        int32_t arpMV = rootMV + ratioMV;
+
+        // Tap tempo clock
+        if (chordPeriod > 0) {
+            clockCounter++;
+            if (clockCounter >= chordPeriod) {
+                clockCounter = 0;
+                tapClockPulseCounter = 240;  // 5ms pulse
+            }
+        }
+        if (tapClockPulseCounter > 0) tapClockPulseCounter--;
+        bool tapClockOut = (tapClockPulseCounter > 0);
+
+        // Arp clock
+        if (arpStepped || chordChanged) {
+            arpClockPulseCounter = 240;  // 5ms pulse
+        }
+        if (arpClockPulseCounter > 0) arpClockPulseCounter--;
+        bool arpClockOut = (arpClockPulseCounter > 0);
+
+        // Clock divider (counts PulseIn2 rising edges)
+        if (pulseIn2Rising) {
+            clockDivCount++;
+            if ((int)clockDivCount >= clockDivRatio) {
+                clockDivCount = 0;
+                clockDivPulseCounter = 240;  // 5ms pulse
+            }
+        }
+        if (clockDivPulseCounter > 0) clockDivPulseCounter--;
+        bool clockDivOut = (clockDivPulseCounter > 0);
+
+        // --- Dispatch outputs ---
+
+        // CV Out 1
+        switch (cv1Mode) {
+            default:
+            case CV1_ARP:       CVOut1Millivolts(arpMV); break;
+            case CV1_ROOT:      CVOut1Millivolts(rootMV); break;
+            case CV1_ENVELOPE:  CVOut1((int16_t)(envFollower >> 16)); break;
+            case CV1_RANDOM_SH: CVOut1Millivolts(randomSHValue); break;
+            case CV1_PITCH_SH:  CVOut1Millivolts(pitchSHValue); break;
+        }
+
+        // CV Out 2
+        switch (cv2Mode) {
+            default:
+            case CV2_RES_ENV:   CVOut2((int16_t)(envFollower >> 16)); break;
+            case CV2_IN_ENV:    CVOut2((int16_t)(inputEnvFollower >> 16)); break;
+            case CV2_ARP:       CVOut2Millivolts(arpMV); break;
+            case CV2_ROOT:      CVOut2Millivolts(rootMV); break;
+        }
+
+        // Pulse Out 1
+        switch (p1Mode) {
+            default:
+            case P1_AUDIO_TRIG: PulseOut1(audioTrigOut); break;
+            case P1_TAP_CLOCK:  PulseOut1(tapClockOut); break;
+            case P1_ARP_CLOCK:  PulseOut1(arpClockOut); break;
+            case P1_ONSET:      PulseOut1(onsetTrigOut); break;
+        }
+
+        // Pulse Out 2
+        switch (p2Mode) {
+            default:
+            case P2_CHORD_TRIG: PulseOut2(chordTrigOut); break;
+            case P2_TAP_CLOCK:  PulseOut2(tapClockOut); break;
+            case P2_AUDIO_TRIG: PulseOut2(audioTrigOut); break;
+            case P2_ARP_CLOCK:  PulseOut2(arpClockOut); break;
+            case P2_CLK_DIV:    PulseOut2(clockDivOut); break;
+            case P2_ONSET:      PulseOut2(onsetTrigOut); break;
         }
 
         // LED indicators - show position in progression (0-17)
