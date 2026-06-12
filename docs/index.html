@@ -1042,6 +1042,7 @@
                 <option value="2">envelope follower</option>
                 <option value="3">random S&amp;H</option>
                 <option value="4">pitch S&amp;H</option>
+                <option value="5">pitch track</option>
             </select>
             <span class="mode-desc" id="cv1-desc"></span>
         </p>
@@ -1067,6 +1068,7 @@
                 <option value="1">input envelope</option>
                 <option value="2">arpeggio pitch</option>
                 <option value="3">root pitch</option>
+                <option value="4">pitch track</option>
             </select>
             <span class="mode-desc" id="cv2-desc"></span>
         </p>
@@ -1607,13 +1609,15 @@
                 'fundamental pitch only, tracks pitch knob and CV input',
                 'tracks resonator output amplitude',
                 'random voltage, new value on each chord change',
-                'samples CV input 1 on pulse input 1 trigger, holds until next trigger'
+                'samples CV input 1 on pulse input 1 trigger, holds until next trigger',
+                'zero-crossing pitch detection, 1V/oct output — patch to CV In 1 for pitch tracking'
             ],
             cv2: [
                 'tracks resonator output amplitude',
                 'tracks raw audio input amplitude',
                 'rotating chord tones as 1V/oct CV',
-                'fundamental pitch only, tracks pitch knob and CV input'
+                'fundamental pitch only, tracks pitch knob and CV input',
+                'zero-crossing pitch detection, 1V/oct output — patch to CV In 1 for pitch tracking'
             ],
             p1: [
                 'Schmitt trigger on input transients, 5ms pulse with 50ms lockout',

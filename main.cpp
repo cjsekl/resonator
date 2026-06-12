@@ -18,6 +18,16 @@ version 1.2 - 2026-05-06
 Four resonating strings using Karplus-Strong synthesis
 */
 
+// Cross-core shared state for YIN pitch detection (Core 0 writes audio, Core 1 computes)
+#define YIN_RING_BITS 6
+#define YIN_RING_SIZE (1 << YIN_RING_BITS)
+static volatile int16_t yinRing[YIN_RING_SIZE];  // audio sample ring buffer
+static volatile uint32_t yinRingHead;             // write index (Core 0)
+static volatile int32_t yinSharedPitchMV;         // pitch result (Core 1 writes, Core 0 reads)
+
+// YIN circular buffer in SRAM4 scratch RAM (after core1_stack at 0x20040000)
+static int16_t* const yinBuf = (int16_t*)0x20040800;
+
 // Delay lookup table for 1V/oct pitch control
 // 341 entries per octave, inverse exponential curve
 // Base: C1 = 32.7Hz at 48kHz = 1468 samples, scaled by 64
@@ -97,9 +107,33 @@ int32_t ratioToMillivolts(int num, int den) {
     }
 }
 
+// Convert measured period (in samples) to 1V/oct millivolts
+// Reverse lookup into delay_vals table
+int32_t periodToMillivolts(int32_t period) {
+    if (period < 24) period = 24;      // clamp ~2kHz max
+    if (period > 1500) period = 1500;  // clamp ~32Hz min
+    // Find octave: largest oct where delay_vals[0] >> oct >= period
+    // delay_vals are <<6 scaled, ExpDelay returns delay_vals[sub] >> oct = samples
+    int oct = 0;
+    while (oct < 11 && (int32_t)(delay_vals[0] >> (oct + 1)) >= period) oct++;
+    // Binary search within delay_vals (monotonically decreasing)
+    // Compare delay_vals[mid] against period << oct for full precision
+    int32_t scaledPeriod = (int32_t)period << oct;
+    int lo = 0, hi = 340;
+    while (lo < hi) {
+        int mid = (lo + hi) >> 1;
+        if ((int32_t)delay_vals[mid] > scaledPeriod)
+            lo = mid + 1;
+        else
+            hi = mid;
+    }
+    int32_t pitchCV = oct * 341 + lo;
+    return (pitchCV - 3069) * 12014 >> 12;  // same reference as rootMV
+}
+
 // Output mode enums
-enum CV1Mode  { CV1_ARP=0, CV1_ROOT, CV1_ENVELOPE, CV1_RANDOM_SH, CV1_PITCH_SH };
-enum CV2Mode  { CV2_RES_ENV=0, CV2_IN_ENV, CV2_ARP, CV2_ROOT };
+enum CV1Mode  { CV1_ARP=0, CV1_ROOT, CV1_ENVELOPE, CV1_RANDOM_SH, CV1_PITCH_SH, CV1_PITCH_TRACK };
+enum CV2Mode  { CV2_RES_ENV=0, CV2_IN_ENV, CV2_ARP, CV2_ROOT, CV2_PITCH_TRACK };
 enum P1Mode   { P1_AUDIO_TRIG=0, P1_TAP_CLOCK, P1_ARP_CLOCK, P1_ONSET };
 enum P2Mode   { P2_CHORD_TRIG=0, P2_TAP_CLOCK, P2_AUDIO_TRIG, P2_ARP_CLOCK, P2_CLK_DIV, P2_ONSET };
 enum PI1Mode  { PI1_PLUCK=0, PI1_ADVANCE, PI1_RESET };
@@ -108,7 +142,7 @@ enum PI2Mode  { PI2_ADVANCE=0, PI2_ARP_STEP, PI2_PLUCK, PI2_RESET };
 class ResonatingStrings : public ComputerCard
 {
 private:
-    static const int MAX_DELAY_SIZE = 1920;
+    static const int MAX_DELAY_SIZE = 2048;  // power of 2 for & mask (no division)
 
     int16_t delayLine1[MAX_DELAY_SIZE];
     int16_t delayLine2[MAX_DELAY_SIZE];
@@ -230,6 +264,37 @@ private:
     int32_t onsetEnvelope;       // slow-tracking baseline envelope (fixed-point <<16)
     int32_t onsetPulseCounter;   // pulse + lockout countdown
 
+
+    // Precomputed flags: which blocks ProcessSample actually needs to run
+    bool needsAudioAbs;
+    bool needsAudioTrig;
+    bool needsOnset;
+    bool needsResEnv;
+    bool needsInEnv;
+    bool needsPitchTrack;
+    bool needsRootMV;
+    bool needsArpMV;
+    bool needsTapClock;
+    bool needsArpClock;
+    bool needsClkDiv;
+    bool needsChordDetect;
+
+    void updateNeedsFlags() {
+        needsArpMV = (cv1Mode == CV1_ARP || cv2Mode == CV2_ARP);
+        needsRootMV = needsArpMV || cv1Mode == CV1_ROOT || cv2Mode == CV2_ROOT;
+        needsResEnv = (cv1Mode == CV1_ENVELOPE || cv2Mode == CV2_RES_ENV);
+        needsInEnv = (cv2Mode == CV2_IN_ENV);
+        needsPitchTrack = (cv1Mode == CV1_PITCH_TRACK || cv2Mode == CV2_PITCH_TRACK);
+        needsAudioTrig = (p1Mode == P1_AUDIO_TRIG || p2Mode == P2_AUDIO_TRIG);
+        needsOnset = (p1Mode == P1_ONSET || p2Mode == P2_ONSET);
+        needsTapClock = (p1Mode == P1_TAP_CLOCK || p2Mode == P2_TAP_CLOCK);
+        needsArpClock = (p1Mode == P1_ARP_CLOCK || p2Mode == P2_ARP_CLOCK);
+        needsClkDiv = (p2Mode == P2_CLK_DIV);
+        needsChordDetect = needsArpMV || needsArpClock || needsTapClock ||
+                           p2Mode == P2_CHORD_TRIG || cv1Mode == CV1_RANDOM_SH;
+        needsAudioAbs = needsAudioTrig || needsOnset || needsInEnv;
+    }
+
     // One-pole lowpass filter for damping
     int32_t dampingFilter(int32_t input, int32_t& state, int32_t coefficient) {
         state += (((input - state) * coefficient + 32768) >> 16);
@@ -244,9 +309,9 @@ private:
                 return arpRotation & 3;
             case 1: // down: 3,2,1,0
                 return 3 - (arpRotation & 3);
-            case 2: { // up-down: 0,1,2,3,2,1
-                static const int updown[] = {0, 1, 2, 3, 2, 1};
-                return updown[arpRotation % 6];
+            case 2: { // up-down: 0,1,2,3,2,1 (period 6, extended to 8 for & mask)
+                static const int updown[] = {0, 1, 2, 3, 2, 1, 0, 1};
+                return updown[arpRotation & 7];
             }
             case 3: // random: cached, updated on arp step
                 return arpRandomString;
@@ -258,10 +323,8 @@ private:
                          int32_t& filterState, int32_t& dcState, int32_t excitation,
                          int32_t dampingCoeff, int32_t frac) {
         // Read two adjacent samples from delay line
-        int readIndex1 = writeIndex - delayLength;
-        if (readIndex1 < 0) readIndex1 += MAX_DELAY_SIZE;
-        int readIndex2 = readIndex1 - 1;
-        if (readIndex2 < 0) readIndex2 += MAX_DELAY_SIZE;
+        int readIndex1 = (writeIndex - delayLength) & (MAX_DELAY_SIZE - 1);
+        int readIndex2 = (readIndex1 - 1) & (MAX_DELAY_SIZE - 1);
 
         int32_t sample1 = delayLine[readIndex1];
         int32_t sample2 = delayLine[readIndex2];
@@ -286,7 +349,7 @@ private:
         delayLine[writeIndex] = (int16_t)newSample;
 
         // Advance write index
-        writeIndex = (writeIndex + 1) % MAX_DELAY_SIZE;
+        writeIndex = (writeIndex + 1) & (MAX_DELAY_SIZE - 1);
 
         return delayedSample;
     }
@@ -455,6 +518,8 @@ public:
             delayLine3[i] = 0;
             delayLine4[i] = 0;
         }
+
+        updateNeedsFlags();
     }
 
     // Check and perform deferred flash save (called from Core 1)
@@ -613,8 +678,8 @@ private:
             return;
         }
         // Validate ranges
-        if (vals[0] < 0 || vals[0] > 4 ||
-            vals[1] < 0 || vals[1] > 3 ||
+        if (vals[0] < 0 || vals[0] > 5 ||
+            vals[1] < 0 || vals[1] > 4 ||
             vals[2] < 0 || vals[2] > 3 ||
             vals[3] < 0 || vals[3] > 5 ||
             vals[4] < 0 || vals[4] > 2 ||
@@ -731,9 +796,9 @@ private:
 
         // Load output modes (bytes 22-27), default to 0 if invalid (old flash)
         uint8_t cv1Val = flash_data[22];
-        cv1Mode = (cv1Val <= 4) ? cv1Val : 0;
+        cv1Mode = (cv1Val <= 5) ? cv1Val : 0;
         uint8_t cv2Val = flash_data[23];
-        cv2Mode = (cv2Val <= 3) ? cv2Val : 0;
+        cv2Mode = (cv2Val <= 4) ? cv2Val : 0;
         uint8_t p1Val = flash_data[24];
         p1Mode = (p1Val <= 3) ? p1Val : 0;
         uint8_t p2Val = flash_data[25];
@@ -783,6 +848,7 @@ private:
         pi1Mode = PI1_PLUCK;
         pi2Mode = PI2_ADVANCE;
         clockDivRatio = 2;
+        outputModesChanged = true;
 
         // Defer flash save to Core 1 (Core 0 can't lock out Core 1)
         pendingFlashSave = true;
@@ -800,6 +866,13 @@ protected:
             progressionIndex = 0;
             currentMode = progressionBuffers[activeBuffer].chords[0];
             progressionChanged = false;
+        }
+
+        // Recompute which output blocks to run when I/O modes change
+        if (outputModesChanged) {
+            __dmb();
+            outputModesChanged = false;
+            updateNeedsFlags();
         }
 
         // Mode switching (switch down or pulse in 2)
@@ -959,7 +1032,7 @@ protected:
         if (dampingKnob < 0) dampingKnob = 0;
 
         // Map to filter coefficient (more damping = lower coefficient, longer decay = higher coefficient)
-        int32_t dampingCoeff = 32000 + ((dampingKnob * 33300) / 4095);
+        int32_t dampingCoeff = 32000 + ((dampingKnob * 33300) >> 12);
 
         // Excitation amounts for each string
         // String 1 gets full input, others get scaled versions (sympathetic response)
@@ -1026,96 +1099,105 @@ protected:
         AudioOut1((int16_t)mixedOutput1);
         AudioOut2((int16_t)mixedOutput2);
 
-        // --- CV and Pulse outputs ---
+        // --- CV and Pulse outputs (only compute what the current I/O config needs) ---
 
-        // Common signal computation
-        chordTimer++;
-        if (arpSettingsChanged) {
-            arpSettingsChanged = false;
-            arpRotation = 0;
-            if (chordPeriod > 0) {
-                arpStepCounter = chordPeriod / arpDivision;
-            }
-        }
-
-        bool chordChanged = (progressionIndex != prevProgressionIndex);
+        bool chordChanged = false;
         bool arpStepped = false;
 
-        if (chordChanged) {
-            chordPulseCounter = 240;  // 5ms at 48kHz
-            chordPeriod = chordTimer;
-            chordTimer = 0;
-            prevProgressionIndex = progressionIndex;
-            arpRotation = 0;
-            noiseState = noiseState * 1103515245 + 12345;
-            arpRandomString = (noiseState >> 16) & 3;
-            arpStepCounter = chordPeriod / arpDivision;
-            // Random S&H: new random value on chord change
-            noiseState = noiseState * 1103515245 + 12345;
-            randomSHValue = ((int32_t)((noiseState >> 16) & 0xFFF) - 2048) * 1000 / 341;
-            // Reset tap tempo clock
-            clockCounter = 0;
-        }
+        // Chord detection, arp stepping, and related state
+        if (needsChordDetect) {
+            chordTimer++;
+            if (arpSettingsChanged) {
+                arpSettingsChanged = false;
+                arpRotation = 0;
+                if (chordPeriod > 0) {
+                    arpStepCounter = chordPeriod / arpDivision;
+                }
+            }
 
-        // Subdivide chord period into arpDivision steps
-        if (chordPeriod > 0 && arpStepCounter > 0) {
-            arpStepCounter--;
-            if (arpStepCounter == 0 && arpRotation < (arpDivision - 1)) {
-                arpRotation++;
-                arpStepped = true;
+            chordChanged = (progressionIndex != prevProgressionIndex);
+
+            if (chordChanged) {
+                chordPulseCounter = 240;  // 5ms at 48kHz
+                chordPeriod = chordTimer;
+                chordTimer = 0;
+                prevProgressionIndex = progressionIndex;
+                arpRotation = 0;
                 noiseState = noiseState * 1103515245 + 12345;
                 arpRandomString = (noiseState >> 16) & 3;
                 arpStepCounter = chordPeriod / arpDivision;
+                noiseState = noiseState * 1103515245 + 12345;
+                randomSHValue = ((int32_t)((noiseState >> 16) & 0xFFF) - 2048) * 12014 >> 12;
+                clockCounter = 0;
+            }
+
+            // Subdivide chord period into arpDivision steps
+            if (chordPeriod > 0 && arpStepCounter > 0) {
+                arpStepCounter--;
+                if (arpStepCounter == 0 && arpRotation < (arpDivision - 1)) {
+                    arpRotation++;
+                    arpStepped = true;
+                    noiseState = noiseState * 1103515245 + 12345;
+                    arpRandomString = (noiseState >> 16) & 3;
+                    arpStepCounter = chordPeriod / arpDivision;
+                }
             }
         }
 
-        // Pitch S&H: capture CV In 1 on Pulse In 1 rising edge (when in pitch S&H mode)
+        // Pitch S&H: capture CV In 1 on Pulse In 1 rising edge
         if (pulseIn1Rising && cv1Mode == CV1_PITCH_SH) {
-            pitchSHValue = (pitchCV - 3069) * 1000 / 341;
+            pitchSHValue = (pitchCV - 3069) * 12014 >> 12;
         }
 
-        // Audio amplitude for trigger and envelope detection
-        int32_t abs1 = audioIn1 < 0 ? -audioIn1 : audioIn1;
-        int32_t abs2 = audioIn2 < 0 ? -audioIn2 : audioIn2;
-        int32_t audioAbs = abs1 > abs2 ? abs1 : abs2;
-
-        // Schmitt trigger detection (always computed, used by P1 and P2 audio trigger modes)
-        if (trigPulseCounter > 0) {
-            trigPulseCounter--;
-        } else {
-            if (triggerArmed && audioAbs > 200) {
-                triggerArmed = false;
-                trigPulseCounter = 2400;  // 50ms lockout (includes 5ms pulse)
-            }
-            if (!triggerArmed && audioAbs < 80) {
-                triggerArmed = true;
-            }
+        // Audio amplitude (shared by schmitt trigger, onset detector, input envelope)
+        int32_t audioAbs = 0;
+        if (needsAudioAbs) {
+            int32_t abs1 = audioIn1 < 0 ? -audioIn1 : audioIn1;
+            int32_t abs2 = audioIn2 < 0 ? -audioIn2 : audioIn2;
+            audioAbs = abs1 > abs2 ? abs1 : abs2;
         }
-        bool audioTrigOut = (trigPulseCounter > 2400 - 240);  // 5ms pulse at start of lockout
 
-        // Onset detector: fires on rapid amplitude rises above a slow baseline
-        {
+        // Schmitt trigger
+        bool audioTrigOut = false;
+        if (needsAudioTrig) {
+            if (trigPulseCounter > 0) {
+                trigPulseCounter--;
+            } else {
+                if (triggerArmed && audioAbs > 200) {
+                    triggerArmed = false;
+                    trigPulseCounter = 2400;
+                }
+                if (!triggerArmed && audioAbs < 80) {
+                    triggerArmed = true;
+                }
+            }
+            audioTrigOut = (trigPulseCounter > 2400 - 240);
+        }
+
+        // Onset detector
+        bool onsetTrigOut = false;
+        if (needsOnset) {
             int32_t target = audioAbs << 16;
             if (target > onsetEnvelope) {
-                onsetEnvelope += (target - onsetEnvelope) >> 8;   // moderate attack (tau ~256 samples)
+                onsetEnvelope += (target - onsetEnvelope) >> 8;
             } else {
-                onsetEnvelope -= (onsetEnvelope - target) >> 12;  // slow release (tau ~4096 samples)
+                onsetEnvelope -= (onsetEnvelope - target) >> 12;
             }
             if (onsetPulseCounter > 0) {
                 onsetPulseCounter--;
             } else if (target > onsetEnvelope + (200 << 16)) {
-                onsetPulseCounter = 2400;  // 50ms lockout (includes 5ms pulse)
-                onsetEnvelope = target;    // snap baseline up to prevent re-trigger
+                onsetPulseCounter = 2400;
+                onsetEnvelope = target;
             }
+            onsetTrigOut = (onsetPulseCounter > 2400 - 240);
         }
-        bool onsetTrigOut = (onsetPulseCounter > 2400 - 240);  // 5ms pulse at start
 
         // Chord change pulse
         if (chordPulseCounter > 0) chordPulseCounter--;
         bool chordTrigOut = (chordPulseCounter > 0);
 
         // Resonator envelope follower
-        {
+        if (needsResEnv) {
             int32_t resAbs = resonatorOut1 < 0 ? -resonatorOut1 : resonatorOut1;
             int32_t target = resAbs << 16;
             if (target > envFollower) {
@@ -1126,7 +1208,7 @@ protected:
         }
 
         // Input envelope follower
-        {
+        if (needsInEnv) {
             int32_t target = audioAbs << 16;
             if (target > inputEnvFollower) {
                 inputEnvFollower += (target - inputEnvFollower) >> 5;
@@ -1135,46 +1217,66 @@ protected:
             }
         }
 
-        // Arp pitch (millivolts)
-        int32_t rootMV = (pitchCV - 3069) * 1000 / 341;
-        int ratioMV;
-        switch (arpStringIndex()) {
-            case 0: ratioMV = ratioToMillivolts(num1, den1); break;
-            case 1: ratioMV = ratioToMillivolts(num2, den2); break;
-            case 2: ratioMV = ratioToMillivolts(num3, den3); break;
-            case 3: ratioMV = ratioToMillivolts(num4, den4); break;
-            default: ratioMV = 0; break;
+        // Feed audio to Core 1 for YIN pitch detection
+        if (needsPitchTrack) {
+            yinRing[yinRingHead & (YIN_RING_SIZE - 1)] = audioIn1;
+            yinRingHead++;
         }
-        int32_t arpMV = rootMV + ratioMV;
+
+        // Arp / root pitch (millivolts)
+        int32_t rootMV = 0, arpMV = 0;
+        if (needsRootMV) {
+            rootMV = (pitchCV - 3069) * 12014 >> 12;
+        }
+        if (needsArpMV) {
+            int ratioMV;
+            switch (arpStringIndex()) {
+                case 0: ratioMV = ratioToMillivolts(num1, den1); break;
+                case 1: ratioMV = ratioToMillivolts(num2, den2); break;
+                case 2: ratioMV = ratioToMillivolts(num3, den3); break;
+                case 3: ratioMV = ratioToMillivolts(num4, den4); break;
+                default: ratioMV = 0; break;
+            }
+            arpMV = rootMV + ratioMV;
+        }
 
         // Tap tempo clock
-        if (chordPeriod > 0) {
-            clockCounter++;
-            if (clockCounter >= chordPeriod) {
-                clockCounter = 0;
-                tapClockPulseCounter = 240;  // 5ms pulse
+        bool tapClockOut = false;
+        if (needsTapClock) {
+            if (chordPeriod > 0) {
+                clockCounter++;
+                if (clockCounter >= chordPeriod) {
+                    clockCounter = 0;
+                    tapClockPulseCounter = 240;
+                }
             }
+            if (tapClockPulseCounter > 0) tapClockPulseCounter--;
+            tapClockOut = (tapClockPulseCounter > 0);
         }
-        if (tapClockPulseCounter > 0) tapClockPulseCounter--;
-        bool tapClockOut = (tapClockPulseCounter > 0);
 
         // Arp clock
-        if (arpStepped || chordChanged) {
-            arpClockPulseCounter = 240;  // 5ms pulse
-        }
-        if (arpClockPulseCounter > 0) arpClockPulseCounter--;
-        bool arpClockOut = (arpClockPulseCounter > 0);
-
-        // Clock divider (counts PulseIn2 rising edges)
-        if (pulseIn2Rising) {
-            clockDivCount++;
-            if ((int)clockDivCount >= clockDivRatio) {
-                clockDivCount = 0;
-                clockDivPulseCounter = 240;  // 5ms pulse
+        bool arpClockOut = false;
+        if (needsArpClock) {
+            if (arpStepped || chordChanged) {
+                arpClockPulseCounter = 240;
             }
+            if (arpClockPulseCounter > 0) arpClockPulseCounter--;
+            arpClockOut = (arpClockPulseCounter > 0);
         }
-        if (clockDivPulseCounter > 0) clockDivPulseCounter--;
-        bool clockDivOut = (clockDivPulseCounter > 0);
+
+        // Clock divider
+        bool clockDivOut = false;
+        if (needsClkDiv) {
+            if (pulseIn2Rising) {
+                clockDivCount++;
+                if ((int)clockDivCount >= clockDivRatio) {
+                    clockDivCount = 0;
+                    clockDivPulseCounter = 240;
+                }
+            }
+            if (clockDivPulseCounter > 0) clockDivPulseCounter--;
+            clockDivOut = (clockDivPulseCounter > 0);
+        }
 
         // --- Dispatch outputs ---
 
@@ -1186,6 +1288,7 @@ protected:
             case CV1_ENVELOPE:  CVOut1((int16_t)(envFollower >> 16)); break;
             case CV1_RANDOM_SH: CVOut1Millivolts(randomSHValue); break;
             case CV1_PITCH_SH:  CVOut1Millivolts(pitchSHValue); break;
+            case CV1_PITCH_TRACK: CVOut1Millivolts(yinSharedPitchMV); break;
         }
 
         // CV Out 2
@@ -1195,6 +1298,7 @@ protected:
             case CV2_IN_ENV:    CVOut2((int16_t)(inputEnvFollower >> 16)); break;
             case CV2_ARP:       CVOut2Millivolts(arpMV); break;
             case CV2_ROOT:      CVOut2Millivolts(rootMV); break;
+            case CV2_PITCH_TRACK: CVOut2Millivolts(yinSharedPitchMV); break;
         }
 
         // Pulse Out 1
@@ -1260,20 +1364,97 @@ protected:
 // Global pointer for Core 1 to access shared state
 static ResonatingStrings* g_resonator = nullptr;
 
-void core1_serial_handler() {
+void core1_handler() {
     sleep_ms(500);  // Wait for USB to settle
 
+    // Serial state
     char lineBuf[128];
     int linePos = 0;
 
+    // YIN pitch detector state (all local to Core 1)
+    const int YIN_W = 150;
+    const int YIN_MIN_LAG = 8;
+    const int YIN_MAX_LAG = 150;
+
+    int32_t hp_state = 0, lp1_state = 0, lp2_state = 0;
+    int bufIdx = 0, decCount = 0;
+    int scanLag = 0;
+    int32_t runningSum = 0, prevNorm = 0;
+    int32_t pitchMV = 0;
+    uint32_t ringTail = 0;
+
+    for (int i = 0; i < 512; i++) yinBuf[i] = 0;
+
     while (true) {
-        int c = getchar_timeout_us(10000);  // 10ms timeout
-        if (c == PICO_ERROR_TIMEOUT) {
-            // Check if Core 0 requested a flash save (e.g. long-press reset)
-            g_resonator->checkPendingFlashSave();
-            continue;
+        // Process all pending audio samples from Core 0
+        uint32_t head = yinRingHead;
+        while (ringTail != head) {
+            int16_t sample = yinRing[ringTail & (YIN_RING_SIZE - 1)];
+            ringTail++;
+
+            // Bandpass + 4x decimation into circular buffer
+            hp_state += (sample - hp_state) >> 9;
+            int32_t hp = sample - hp_state;
+            lp1_state += (hp - lp1_state) >> 3;
+            lp2_state += (lp1_state - lp2_state) >> 3;
+            if (++decCount >= 4) {
+                decCount = 0;
+                yinBuf[bufIdx] = (int16_t)lp2_state;
+                bufIdx = (bufIdx + 1) & 511;
+            }
         }
-        if (c == '\n' || c == '\r') {
+
+        // Compute up to 4 YIN lags per iteration (full window each, no chunking)
+        if (scanLag <= YIN_MAX_LAG && ringTail > 0) {
+            int base = (bufIdx - 1) & 511;
+            for (int n = 0; n < 4 && scanLag <= YIN_MAX_LAG; n++) {
+                uint32_t sum = 0;
+                int lag = scanLag;
+                for (int i = 0; i < YIN_W; i++) {
+                    int idx1 = (base - i) & 511;
+                    int idx2 = (idx1 - lag) & 511;
+                    int32_t diff = (int32_t)yinBuf[idx1] - yinBuf[idx2];
+                    sum += (uint32_t)(diff * diff);
+                }
+
+                bool detected = false;
+                int32_t d = (int32_t)sum;
+                if (scanLag > 0) {
+                    runningSum += d;
+                    if (scanLag >= YIN_MIN_LAG) {
+                        // Division-free CMND: d'(τ) < 0.1 iff d(τ)*τ*10 < runningSum
+                        int32_t dTimesLag = d * scanLag;
+                        int32_t lhs = (dTimesLag << 3) + (dTimesLag << 1);
+                        if (lhs < runningSum && dTimesLag >= prevNorm) {
+                            int32_t period = (scanLag - 1) * 4;
+                            int32_t newMV = periodToMillivolts(period);
+                            pitchMV += (newMV - pitchMV) >> 3;
+                            yinSharedPitchMV = pitchMV;
+                            detected = true;
+                        }
+                        prevNorm = dTimesLag;
+                    }
+                }
+                if (detected) {
+                    scanLag = 0;
+                    runningSum = 0;
+                    prevNorm = 0;
+                    break;
+                }
+                scanLag++;
+            }
+            if (scanLag > YIN_MAX_LAG) {
+                scanLag = 0;
+                runningSum = 0;
+                prevNorm = 0;
+            }
+        }
+
+        // Non-blocking serial check
+        int c = getchar_timeout_us(0);
+        if (c == PICO_ERROR_TIMEOUT) {
+            g_resonator->checkPendingFlashSave();
+        } else if (c == '\n' || c == '\r') {
             if (linePos > 0) {
                 lineBuf[linePos] = '\0';
                 g_resonator->handleSerialCommand(lineBuf);
@@ -1295,7 +1476,7 @@ int main() {
     // Enable lockout handler so Core 0 can be safely paused during flash operations
     multicore_lockout_victim_init();
 
-    multicore_launch_core1(core1_serial_handler);
+    multicore_launch_core1(core1_handler);
     resonator.Run();
     return 0;
 }
