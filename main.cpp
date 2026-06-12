@@ -128,7 +128,9 @@ int32_t periodToMillivolts(int32_t period) {
             hi = mid;
     }
     int32_t pitchCV = oct * 341 + lo;
-    return (pitchCV - 3069) * 12014 >> 12;  // same reference as rootMV
+    // Reference 2048 (CV In 1 midpoint) so self-patching CV Out → CV In round-trips correctly.
+    // X knob becomes transpose (±1 octave) when CV is connected.
+    return (pitchCV - 2048) * 12014 >> 12;
 }
 
 // Output mode enums
@@ -261,6 +263,7 @@ private:
     int32_t inputEnvFollower;
 
     // Onset detector state
+    int32_t onsetPeakEnv;        // peak-hold envelope for onset detection (fixed-point <<16)
     int32_t onsetEnvelope;       // slow-tracking baseline envelope (fixed-point <<16)
     int32_t onsetPulseCounter;   // pulse + lockout countdown
 
@@ -494,7 +497,7 @@ public:
                           randomSHValue(0), arpClockPulseCounter(0),
                           pitchSHValue(0), clockDivCount(0), clockDivRatio(2), clockDivPulseCounter(0),
                           inputEnvFollower(0),
-                          onsetEnvelope(0), onsetPulseCounter(0) {
+                          onsetPeakEnv(0), onsetEnvelope(0), onsetPulseCounter(0) {
         // Try to load progression from flash, fall back to defaults
         if (!loadProgressionFromFlash()) {
             // Default progression: all chords (card works standalone without browser UI)
@@ -1177,19 +1180,33 @@ protected:
         // Onset detector
         bool onsetTrigOut = false;
         if (needsOnset) {
+            // Stage 1: Peak-hold envelope — instant attack, slow release
+            // Smooths out waveform zero-crossing dips without adding onset latency
             int32_t target = audioAbs << 16;
-            if (target > onsetEnvelope) {
-                onsetEnvelope += (target - onsetEnvelope) >> 8;
+            if (target > onsetPeakEnv) {
+                onsetPeakEnv = target;                           // instant attack
             } else {
-                onsetEnvelope -= (onsetEnvelope - target) >> 12;
+                onsetPeakEnv -= (onsetPeakEnv - target) >> 13;  // release τ ≈ 170ms
             }
+
+            // Stage 2: Baseline tracker — adapts to sustained level
+            if (onsetPeakEnv > onsetEnvelope) {
+                onsetEnvelope += (onsetPeakEnv - onsetEnvelope) >> 10;  // attack τ ≈ 21ms
+            } else {
+                onsetEnvelope -= (onsetEnvelope - onsetPeakEnv) >> 12;  // release τ ≈ 85ms
+            }
+
+            // Hybrid threshold: 12.5% of baseline or absolute minimum
+            int32_t threshold = onsetEnvelope >> 3;
+            if (threshold < (80 << 16)) threshold = (80 << 16);
+
             if (onsetPulseCounter > 0) {
                 onsetPulseCounter--;
-            } else if (target > onsetEnvelope + (200 << 16)) {
-                onsetPulseCounter = 2400;
-                onsetEnvelope = target;
+            } else if (onsetPeakEnv > onsetEnvelope + threshold) {
+                onsetPulseCounter = 2400;         // 50ms lockout
+                onsetEnvelope = onsetPeakEnv;     // snap baseline to current peak
             }
-            onsetTrigOut = (onsetPulseCounter > 2400 - 240);
+            onsetTrigOut = (onsetPulseCounter > 2400 - 240);  // 5ms pulse
         }
 
         // Chord change pulse
@@ -1379,8 +1396,10 @@ void core1_handler() {
     int32_t hp_state = 0, lp1_state = 0, lp2_state = 0;
     int bufIdx = 0, decCount = 0;
     int scanLag = 0;
-    int32_t runningSum = 0, prevNorm = 0;
+    int64_t runningSum = 0, prevNorm = 0;
+    bool foundDip = false;
     int32_t pitchMV = 0;
+    int32_t yinAmplitude = 0;   // peak-hold envelope of decimated signal
     uint32_t ringTail = 0;
 
     for (int i = 0; i < 512; i++) yinBuf[i] = 0;
@@ -1401,6 +1420,13 @@ void core1_handler() {
                 decCount = 0;
                 yinBuf[bufIdx] = (int16_t)lp2_state;
                 bufIdx = (bufIdx + 1) & 511;
+                // Peak-hold amplitude for pitch gate
+                int32_t absVal = lp2_state < 0 ? -lp2_state : lp2_state;
+                if (absVal > yinAmplitude) {
+                    yinAmplitude = absVal;                    // instant attack
+                } else {
+                    yinAmplitude -= yinAmplitude >> 11;       // release τ ≈ 170ms at 12kHz
+                }
             }
         }
 
@@ -1408,30 +1434,35 @@ void core1_handler() {
         if (scanLag <= YIN_MAX_LAG && ringTail > 0) {
             int base = (bufIdx - 1) & 511;
             for (int n = 0; n < 4 && scanLag <= YIN_MAX_LAG; n++) {
-                uint32_t sum = 0;
+                uint64_t sum = 0;
                 int lag = scanLag;
                 for (int i = 0; i < YIN_W; i++) {
                     int idx1 = (base - i) & 511;
                     int idx2 = (idx1 - lag) & 511;
                     int32_t diff = (int32_t)yinBuf[idx1] - yinBuf[idx2];
-                    sum += (uint32_t)(diff * diff);
+                    sum += (uint32_t)diff * (uint32_t)diff;
                 }
 
                 bool detected = false;
-                int32_t d = (int32_t)sum;
+                int64_t d = (int64_t)sum;
                 if (scanLag > 0) {
                     runningSum += d;
                     if (scanLag >= YIN_MIN_LAG) {
-                        // Division-free CMND: d'(τ) < 0.1 iff d(τ)*τ*10 < runningSum
-                        int32_t dTimesLag = d * scanLag;
-                        int32_t lhs = (dTimesLag << 3) + (dTimesLag << 1);
-                        if (lhs < runningSum && dTimesLag >= prevNorm) {
+                        // CMND: d'(τ) = d(τ)*τ / runningSum
+                        int64_t dTimesLag = d * (int64_t)scanLag;
+                        int64_t lhs = (dTimesLag << 3) + (dTimesLag << 1); // ×10
+                        bool belowThreshold = (lhs < runningSum);
+                        // Detect first local minimum after crossing below threshold
+                        if (foundDip && dTimesLag > prevNorm) {
                             int32_t period = (scanLag - 1) * 4;
                             int32_t newMV = periodToMillivolts(period);
-                            pitchMV += (newMV - pitchMV) >> 3;
-                            yinSharedPitchMV = pitchMV;
+                            if (yinAmplitude > 40) {            // gate: hold pitch when signal is too weak
+                                pitchMV += (newMV - pitchMV) >> 3;
+                                yinSharedPitchMV = pitchMV;
+                            }
                             detected = true;
                         }
+                        foundDip = foundDip || belowThreshold;
                         prevNorm = dTimesLag;
                     }
                 }
@@ -1439,6 +1470,7 @@ void core1_handler() {
                     scanLag = 0;
                     runningSum = 0;
                     prevNorm = 0;
+                    foundDip = false;
                     break;
                 }
                 scanLag++;
@@ -1447,6 +1479,7 @@ void core1_handler() {
                 scanLag = 0;
                 runningSum = 0;
                 prevNorm = 0;
+                foundDip = false;
             }
         }
 
