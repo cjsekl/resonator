@@ -94,6 +94,7 @@ private:
     volatile int p2Mode;       // P2Mode enum
     volatile int pi1Mode;      // PI1Mode enum
     volatile int pi2Mode;      // PI2Mode enum
+    volatile int ao2Mode;      // AO2Mode enum
     volatile bool outputModesChanged;
 
     // Tap tempo clock state

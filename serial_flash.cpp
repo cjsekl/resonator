@@ -132,14 +132,14 @@ void ResonatingStrings::handleSetPat(const char* args) {
 }
 
 void ResonatingStrings::handleGetOut() {
-    printf("OUT %d,%d,%d,%d,%d,%d\n", (int)cv1Mode, (int)cv2Mode, (int)p1Mode, (int)p2Mode, (int)pi1Mode, (int)pi2Mode);
+    printf("OUT %d,%d,%d,%d,%d,%d,%d\n", (int)cv1Mode, (int)cv2Mode, (int)p1Mode, (int)p2Mode, (int)pi1Mode, (int)pi2Mode, (int)ao2Mode);
 }
 
 void ResonatingStrings::handleSetOut(const char* args) {
-    int vals[6];
+    int vals[7];
     int count = 0;
     const char* p = args;
-    while (*p && count < 6) {
+    while (*p && count < 7) {
         int val = 0;
         bool hasDigit = false;
         while (*p >= '0' && *p <= '9') {
@@ -151,7 +151,7 @@ void ResonatingStrings::handleSetOut(const char* args) {
         vals[count++] = val;
         if (*p == ',') p++;
     }
-    if (count != 6) {
+    if (count != 6 && count != 7) {
         printf("ERR invalid_out_args\n");
         return;
     }
@@ -161,7 +161,8 @@ void ResonatingStrings::handleSetOut(const char* args) {
         vals[2] < 0 || vals[2] > 3 ||
         vals[3] < 0 || vals[3] > 5 ||
         vals[4] < 0 || vals[4] > 2 ||
-        vals[5] < 0 || vals[5] > 3) {
+        vals[5] < 0 || vals[5] > 3 ||
+        (count == 7 && (vals[6] < 0 || vals[6] > 2))) {
         printf("ERR invalid_out_mode\n");
         return;
     }
@@ -171,6 +172,7 @@ void ResonatingStrings::handleSetOut(const char* args) {
     p2Mode = vals[3];
     pi1Mode = vals[4];
     pi2Mode = vals[5];
+    if (count == 7) ao2Mode = vals[6];
     outputModesChanged = true;
     handleGetOut();
     saveProgressionToFlash();
@@ -217,6 +219,7 @@ void ResonatingStrings::saveProgressionToFlash() {
     data[26] = (uint8_t)pi1Mode;
     data[27] = (uint8_t)pi2Mode;
     data[28] = (uint8_t)clockDivRatio;
+    data[29] = (uint8_t)ao2Mode;
 
     // Pause Core 0 during flash operation (XIP is blocked during erase/program)
     multicore_lockout_start_blocking();
@@ -293,6 +296,10 @@ bool ResonatingStrings::loadProgressionFromFlash() {
         clockDivRatio = 2;
     }
 
+    // Load Audio Out 2 mode (byte 29), default to 0 (audio) if invalid
+    uint8_t ao2Val = flash_data[29];
+    ao2Mode = (ao2Val <= 2) ? ao2Val : 0;
+
     return true;
 }
 
@@ -325,6 +332,7 @@ void ResonatingStrings::resetToDefaults() {
     pi1Mode = PI1_PLUCK;
     pi2Mode = PI2_ADVANCE;
     clockDivRatio = 2;
+    ao2Mode = AO2_AUDIO;
     outputModesChanged = true;
 
     // Defer flash save to Core 1 (Core 0 can't lock out Core 1)

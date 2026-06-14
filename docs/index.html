@@ -1073,6 +1073,15 @@
             <span class="mode-desc" id="cv2-desc"></span>
         </p>
         <hr>
+        <p>Audio out 2 &mdash;
+            <select id="ao2-mode">
+                <option value="0" selected>stereo audio</option>
+                <option value="1">resonator envelope</option>
+                <option value="2">input envelope</option>
+            </select>
+            <span class="mode-desc" id="ao2-desc"></span>
+        </p>
+        <hr>
         <p>Pulse output 1 &mdash;
             <select id="p1-mode">
                 <option value="0" selected>audio trigger</option>
@@ -1269,13 +1278,16 @@
                 }
             } else if (line.startsWith("OUT ")) {
                 const vals = line.substring(4).split(",").map(Number);
-                if (vals.length === 6) {
+                if (vals.length >= 6) {
                     document.getElementById('cv1-mode').value = String(vals[0]);
                     document.getElementById('cv2-mode').value = String(vals[1]);
                     document.getElementById('p1-mode').value = String(vals[2]);
                     document.getElementById('p2-mode').value = String(vals[3]);
                     document.getElementById('pi1-mode').value = String(vals[4]);
                     document.getElementById('pi2-mode').value = String(vals[5]);
+                    if (vals.length >= 7) {
+                        document.getElementById('ao2-mode').value = String(vals[6]);
+                    }
                     updateConditionalRows();
                 }
             } else if (line.startsWith("DIV ")) {
@@ -1598,7 +1610,8 @@
             const p2 = document.getElementById('p2-mode').value;
             const pi1 = document.getElementById('pi1-mode').value;
             const pi2 = document.getElementById('pi2-mode').value;
-            sendCommand('SETOUT ' + [cv1,cv2,p1,p2,pi1,pi2].join(',') + '\n');
+            const ao2 = document.getElementById('ao2-mode').value;
+            sendCommand('SETOUT ' + [cv1,cv2,p1,p2,pi1,pi2,ao2].join(',') + '\n');
             sendCommand('SETDIV ' + document.getElementById('clk-div-ratio').value + '\n');
         });
 
@@ -1618,6 +1631,11 @@
                 'rotating chord tones as 1V/oct CV',
                 'fundamental pitch only, tracks pitch knob and CV input',
                 'zero-crossing pitch detection, 1V/oct output — patch to CV In 1 for pitch tracking'
+            ],
+            ao2: [
+                'normal stereo audio output',
+                'resonator envelope as CV (audio goes mono)',
+                'input envelope as CV (audio goes mono)'
             ],
             p1: [
                 'Schmitt trigger on input transients, 5ms pulse with 50ms lockout',
@@ -1650,6 +1668,7 @@
         function updateConditionalRows() {
             const cv1 = document.getElementById('cv1-mode').value;
             const cv2 = document.getElementById('cv2-mode').value;
+            const ao2 = document.getElementById('ao2-mode').value;
             const p1 = document.getElementById('p1-mode').value;
             const p2 = document.getElementById('p2-mode').value;
             const pi1 = document.getElementById('pi1-mode').value;
@@ -1664,6 +1683,7 @@
             // Update description text
             document.getElementById('cv1-desc').textContent = modeDescs.cv1[cv1] || '';
             document.getElementById('cv2-desc').textContent = modeDescs.cv2[cv2] || '';
+            document.getElementById('ao2-desc').textContent = modeDescs.ao2[ao2] || '';
             document.getElementById('p1-desc').textContent = modeDescs.p1[p1] || '';
             document.getElementById('p2-desc').textContent = modeDescs.p2[p2] || '';
             document.getElementById('pi1-desc').textContent = modeDescs.pi1[pi1] || '';
@@ -1680,6 +1700,7 @@
 
         document.getElementById('cv1-mode').addEventListener('change', onModeChange);
         document.getElementById('cv2-mode').addEventListener('change', onModeChange);
+        document.getElementById('ao2-mode').addEventListener('change', onModeChange);
         document.getElementById('p1-mode').addEventListener('change', onModeChange);
         document.getElementById('p2-mode').addEventListener('change', onModeChange);
         document.getElementById('pi1-mode').addEventListener('change', onModeChange);

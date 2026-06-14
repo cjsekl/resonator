@@ -5,8 +5,8 @@
 void ResonatingStrings::updateNeedsFlags() {
     needsArpMV = (cv1Mode == CV1_ARP || cv2Mode == CV2_ARP);
     needsRootMV = needsArpMV || cv1Mode == CV1_ROOT || cv2Mode == CV2_ROOT;
-    needsResEnv = (cv1Mode == CV1_ENVELOPE || cv2Mode == CV2_RES_ENV);
-    needsInEnv = (cv2Mode == CV2_IN_ENV);
+    needsResEnv = (cv1Mode == CV1_ENVELOPE || cv2Mode == CV2_RES_ENV || ao2Mode == AO2_RES_ENV);
+    needsInEnv = (cv2Mode == CV2_IN_ENV || ao2Mode == AO2_IN_ENV);
     needsPitchTrack = (cv1Mode == CV1_PITCH_TRACK || cv2Mode == CV2_PITCH_TRACK);
     needsAudioTrig = (p1Mode == P1_AUDIO_TRIG || p2Mode == P2_AUDIO_TRIG);
     needsOnset = (p1Mode == P1_ONSET || p2Mode == P2_ONSET);
@@ -92,7 +92,7 @@ ResonatingStrings::ResonatingStrings() : writeIndex1(0), writeIndex2(0), writeIn
                       trigPulseCounter(0), prevProgressionIndex(0), chordPulseCounter(0),
                       chordPeriod(0), chordTimer(0), arpStepCounter(0), arpDivision(4), arpPattern(0), arpSettingsChanged(false), arpRandomString(0),
                       cv1Mode(CV1_ARP), cv2Mode(CV2_RES_ENV), p1Mode(P1_AUDIO_TRIG), p2Mode(P2_CHORD_TRIG),
-                      pi1Mode(PI1_PLUCK), pi2Mode(PI2_ADVANCE), outputModesChanged(false),
+                      pi1Mode(PI1_PLUCK), pi2Mode(PI2_ADVANCE), ao2Mode(AO2_AUDIO), outputModesChanged(false),
                       clockCounter(0), tapClockPulseCounter(0),
                       randomSHValue(0), arpClockPulseCounter(0),
                       pitchSHValue(0), clockDivCount(0), clockDivRatio(2), clockDivPulseCounter(0),
@@ -367,9 +367,11 @@ void ResonatingStrings::ProcessSample() {
     if (mixedOutput2 > 2047) mixedOutput2 = 2047;
     if (mixedOutput2 < -2047) mixedOutput2 = -2047;
 
-    // Stereo output
+    // Audio output (stereo when AO2 is audio, mono when AO2 is CV)
     AudioOut1((int16_t)mixedOutput1);
-    AudioOut2((int16_t)mixedOutput2);
+    if (ao2Mode == AO2_AUDIO) {
+        AudioOut2((int16_t)mixedOutput2);
+    }
 
     // --- CV and Pulse outputs (only compute what the current I/O config needs) ---
 
@@ -585,6 +587,16 @@ void ResonatingStrings::ProcessSample() {
         case CV2_ARP:       CVOut2Millivolts(arpMV); break;
         case CV2_ROOT:      CVOut2Millivolts(rootMV); break;
         case CV2_PITCH_TRACK: CVOut2Millivolts(yinSharedPitchMV); break;
+    }
+
+    // Audio Out 2 (as CV)
+    if (ao2Mode != AO2_AUDIO) {
+        int16_t ao2val = 0;
+        switch (ao2Mode) {
+            case AO2_RES_ENV: ao2val = (int16_t)(envFollower >> 16); break;
+            case AO2_IN_ENV:  ao2val = (int16_t)(inputEnvFollower >> 16); break;
+        }
+        AudioOut2(ao2val);
     }
 
     // Pulse Out 1
