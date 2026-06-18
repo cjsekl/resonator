@@ -92,7 +92,7 @@ ResonatingStrings::ResonatingStrings() : writeIndex1(0), writeIndex2(0), writeIn
                       trigPulseCounter(0), prevProgressionIndex(0), chordPulseCounter(0),
                       chordPeriod(0), chordTimer(0), arpStepCounter(0), arpDivision(4), arpPattern(0), arpSettingsChanged(false), arpRandomString(0),
                       cv1Mode(CVOUT_ARP), cv2Mode(CVOUT_RES_ENV), p1Mode(P1_AUDIO_TRIG), p2Mode(P2_CHORD_TRIG),
-                      pi1Mode(PI1_PLUCK), pi2Mode(PI2_ADVANCE), ao2Mode(AO2_AUDIO), ci1Mode(CI1_VOCT), outputModesChanged(false),
+                      pi1Mode(PI1_PLUCK), pi2Mode(PI2_ADVANCE), ao2Mode(AO2_AUDIO), ci1Mode(CI1_VOCT), ci2Mode(CI2_DAMPING), outputModesChanged(false),
                       clockCounter(0), tapClockPulseCounter(0),
                       randomSHValue(0), arpClockPulseCounter(0),
                       pitchSHValue(0), clockDivCount(0), clockDivRatio(2), clockDivPulseCounter(0),
@@ -144,7 +144,11 @@ void ResonatingStrings::ProcessSample() {
     if (outputModesChanged) {
         __dmb();
         outputModesChanged = false;
+        bool hadResEnv = needsResEnv;
+        bool hadInEnv = needsInEnv;
         updateNeedsFlags();
+        if (needsResEnv && !hadResEnv) envFollower = 0;
+        if (needsInEnv && !hadInEnv) inputEnvFollower = 0;
     }
 
     // Mode switching (switch down or pulse in 2)
@@ -303,8 +307,9 @@ void ResonatingStrings::ProcessSample() {
     if (delayLength3 > MAX_DELAY_SIZE - 1) delayLength3 = MAX_DELAY_SIZE - 1;
     if (delayLength4 > MAX_DELAY_SIZE - 1) delayLength4 = MAX_DELAY_SIZE - 1;
 
-    // DAMPING CONTROL (Y Knob + CV2)
-    int32_t dampingKnob = KnobVal(Y) + CVIn2();  // 0-4095 knob + CV
+    // DAMPING CONTROL (Y Knob + optional CV2)
+    int32_t cv2val = CVIn2();
+    int32_t dampingKnob = KnobVal(Y) + (ci2Mode == CI2_DAMPING ? cv2val : 0);
     if (dampingKnob > 4095) dampingKnob = 4095;
     if (dampingKnob < 0) dampingKnob = 0;
 
@@ -357,8 +362,10 @@ void ResonatingStrings::ProcessSample() {
     resonatorOut1 *= 2;
     resonatorOut2 *= 2;
 
-    // WET/DRY MIX (Main Knob)
-    int32_t mixKnob = KnobVal(Main);  // 0-4095
+    // WET/DRY MIX (Main Knob + optional CV2)
+    int32_t mixKnob = KnobVal(Main) + (ci2Mode == CI2_MIX ? cv2val : 0);
+    if (mixKnob > 4095) mixKnob = 4095;
+    if (mixKnob < 0) mixKnob = 0;
 
     int32_t dryGain = 4095 - mixKnob;
     int32_t wetGain = mixKnob;

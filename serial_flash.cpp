@@ -132,14 +132,14 @@ void ResonatingStrings::handleSetPat(const char* args) {
 }
 
 void ResonatingStrings::handleGetOut() {
-    printf("OUT %d,%d,%d,%d,%d,%d,%d,%d\n", (int)cv1Mode, (int)cv2Mode, (int)p1Mode, (int)p2Mode, (int)pi1Mode, (int)pi2Mode, (int)ao2Mode, (int)ci1Mode);
+    printf("OUT %d,%d,%d,%d,%d,%d,%d,%d,%d\n", (int)cv1Mode, (int)cv2Mode, (int)p1Mode, (int)p2Mode, (int)pi1Mode, (int)pi2Mode, (int)ao2Mode, (int)ci1Mode, (int)ci2Mode);
 }
 
 void ResonatingStrings::handleSetOut(const char* args) {
-    int vals[8];
+    int vals[9];
     int count = 0;
     const char* p = args;
-    while (*p && count < 8) {
+    while (*p && count < 9) {
         int val = 0;
         bool hasDigit = false;
         while (*p >= '0' && *p <= '9') {
@@ -151,7 +151,7 @@ void ResonatingStrings::handleSetOut(const char* args) {
         vals[count++] = val;
         if (*p == ',') p++;
     }
-    if (count < 6 || count > 8) {
+    if (count < 6 || count > 9) {
         printf("ERR invalid_out_args\n");
         return;
     }
@@ -163,7 +163,8 @@ void ResonatingStrings::handleSetOut(const char* args) {
         vals[4] < 0 || vals[4] > 2 ||
         vals[5] < 0 || vals[5] > 3 ||
         (count >= 7 && (vals[6] < 0 || vals[6] > 2)) ||
-        (count >= 8 && (vals[7] < 0 || vals[7] > 1))) {
+        (count >= 8 && (vals[7] < 0 || vals[7] > 1)) ||
+        (count >= 9 && (vals[8] < 0 || vals[8] > 1))) {
         printf("ERR invalid_out_mode\n");
         return;
     }
@@ -175,6 +176,7 @@ void ResonatingStrings::handleSetOut(const char* args) {
     pi2Mode = vals[5];
     if (count >= 7) ao2Mode = vals[6];
     if (count >= 8) ci1Mode = vals[7];
+    if (count >= 9) ci2Mode = vals[8];
     outputModesChanged = true;
     handleGetOut();
     saveProgressionToFlash();
@@ -223,6 +225,7 @@ void ResonatingStrings::saveProgressionToFlash() {
     data[28] = (uint8_t)clockDivRatio;
     data[29] = (uint8_t)ao2Mode;
     data[30] = (uint8_t)ci1Mode;
+    data[31] = (uint8_t)ci2Mode;
 
     // Pause Core 0 during flash operation (XIP is blocked during erase/program)
     multicore_lockout_start_blocking();
@@ -307,6 +310,10 @@ bool ResonatingStrings::loadProgressionFromFlash() {
     uint8_t ci1Val = flash_data[30];
     ci1Mode = (ci1Val <= 1) ? ci1Val : 0;
 
+    // Load CV Input 2 mode (byte 31), default to 0 (damping) if invalid
+    uint8_t ci2Val = flash_data[31];
+    ci2Mode = (ci2Val <= 1) ? ci2Val : 0;
+
     return true;
 }
 
@@ -341,6 +348,7 @@ void ResonatingStrings::resetToDefaults() {
     clockDivRatio = 2;
     ao2Mode = AO2_AUDIO;
     ci1Mode = CI1_VOCT;
+    ci2Mode = CI2_DAMPING;
     outputModesChanged = true;
 
     // Defer flash save to Core 1 (Core 0 can't lock out Core 1)

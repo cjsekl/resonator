@@ -1049,7 +1049,7 @@
         <hr>
         <p>Audio out 2 &mdash;
             <select id="ao2-mode">
-                <option value="0" selected>stereo audio</option>
+                <option value="0" selected>audio</option>
                 <option value="1">resonator envelope</option>
                 <option value="2">input envelope</option>
             </select>
@@ -1065,7 +1065,11 @@
         </p>
         <hr>
         <p>CV in 2 &mdash;
-            <span class="mode-desc">damping control (added to Y knob)</span>
+            <select id="ci2-mode">
+                <option value="0" selected>damping</option>
+                <option value="1">wet/dry mix</option>
+            </select>
+            <span class="mode-desc" id="ci2-desc"></span>
         </p>
         <hr>
         <p>CV out 1 &mdash;
@@ -1080,15 +1084,15 @@
             </select>
             <span class="mode-desc" id="cv1-desc"></span>
         </p>
-        <p id="arp-settings-row" style="margin-top:4px">
-            <select id="arp-pattern">
+        <p id="arp-settings-row-1" style="margin-top:4px">
+            <select id="arp-pattern-1">
                 <option value="0" selected>up</option>
                 <option value="1">down</option>
                 <option value="2">up-down</option>
                 <option value="3">random</option>
             </select>
         pattern, chord period divided into
-            <select id="arp-division">
+            <select id="arp-division-1">
                 <option value="1">1</option>
                 <option value="2">2</option>
                 <option value="4" selected>4</option>
@@ -1108,6 +1112,21 @@
             </select>
             <span class="mode-desc" id="cv2-desc"></span>
         </p>
+        <p id="arp-settings-row-2" style="margin-top:4px">
+            <select id="arp-pattern-2">
+                <option value="0" selected>up</option>
+                <option value="1">down</option>
+                <option value="2">up-down</option>
+                <option value="3">random</option>
+            </select>
+        pattern, chord period divided into
+            <select id="arp-division-2">
+                <option value="1">1</option>
+                <option value="2">2</option>
+                <option value="4" selected>4</option>
+                <option value="8">8</option>
+            </select>
+        steps</p>
         <hr>
         <p>Pulse in 1 &mdash;
             <select id="pi1-mode">
@@ -1242,7 +1261,7 @@
                 statusEl.className = "connected";
                 connectBtn.textContent = "Disconnect";
                 connectBtn.className = "connected";
-                sendBtn.disabled = false;
+                sendBtn.disabled = getProgressionIds().length === 0;
                 document.getElementById('outputs-save-btn').disabled = false;
 
                 readLoop();
@@ -1296,12 +1315,14 @@
             } else if (line.startsWith("ARP ")) {
                 const val = parseInt(line.substring(4));
                 if (val === 1 || val === 2 || val === 4 || val === 8) {
-                    document.getElementById('arp-division').value = String(val);
+                    document.getElementById('arp-division-1').value = String(val);
+                    document.getElementById('arp-division-2').value = String(val);
                 }
             } else if (line.startsWith("PAT ")) {
                 const val = parseInt(line.substring(4));
                 if (val >= 0 && val <= 3) {
-                    document.getElementById('arp-pattern').value = String(val);
+                    document.getElementById('arp-pattern-1').value = String(val);
+                    document.getElementById('arp-pattern-2').value = String(val);
                 }
             } else if (line.startsWith("OUT ")) {
                 const vals = line.substring(4).split(",").map(Number);
@@ -1317,6 +1338,9 @@
                     }
                     if (vals.length >= 8) {
                         document.getElementById('ci1-mode').value = String(vals[7]);
+                    }
+                    if (vals.length >= 9) {
+                        document.getElementById('ci2-mode').value = String(vals[8]);
                     }
                     updateConditionalRows();
                 }
@@ -1351,7 +1375,9 @@
         const clearBtn = document.getElementById('clearBtn');
 
         function updateClearBtn() {
-            clearBtn.disabled = progList.children.length === 0;
+            const empty = getProgressionIds().length === 0;
+            clearBtn.disabled = empty;
+            if (port) sendBtn.disabled = empty;
         }
 
         clearBtn.addEventListener('click', () => {
@@ -1614,8 +1640,16 @@
         const mainContent = document.getElementById('mainContent');
         const outputsContent = document.getElementById('outputsContent');
         const outputsSaveBtn = document.getElementById('outputs-save-btn');
-        const arpPatternSelect = document.getElementById('arp-pattern');
-        const arpDivisionSelect = document.getElementById('arp-division');
+        const arpPattern1 = document.getElementById('arp-pattern-1');
+        const arpDivision1 = document.getElementById('arp-division-1');
+        const arpPattern2 = document.getElementById('arp-pattern-2');
+        const arpDivision2 = document.getElementById('arp-division-2');
+
+        // Keep both arp settings rows in sync
+        arpPattern1.addEventListener('change', () => { arpPattern2.value = arpPattern1.value; });
+        arpPattern2.addEventListener('change', () => { arpPattern1.value = arpPattern2.value; });
+        arpDivision1.addEventListener('change', () => { arpDivision2.value = arpDivision1.value; });
+        arpDivision2.addEventListener('change', () => { arpDivision1.value = arpDivision2.value; });
 
         tabChords.addEventListener('click', () => {
             tabChords.classList.add('active');
@@ -1632,8 +1666,8 @@
         });
 
         outputsSaveBtn.addEventListener('click', () => {
-            sendCommand('SETARP ' + arpDivisionSelect.value + '\n');
-            sendCommand('SETPAT ' + arpPatternSelect.value + '\n');
+            sendCommand('SETARP ' + arpDivision1.value + '\n');
+            sendCommand('SETPAT ' + arpPattern1.value + '\n');
             const cv1 = document.getElementById('cv1-mode').value;
             const cv2 = document.getElementById('cv2-mode').value;
             const p1 = document.getElementById('p1-mode').value;
@@ -1642,7 +1676,8 @@
             const pi2 = document.getElementById('pi2-mode').value;
             const ao2 = document.getElementById('ao2-mode').value;
             const ci1 = document.getElementById('ci1-mode').value;
-            sendCommand('SETOUT ' + [cv1,cv2,p1,p2,pi1,pi2,ao2,ci1].join(',') + '\n');
+            const ci2 = document.getElementById('ci2-mode').value;
+            sendCommand('SETOUT ' + [cv1,cv2,p1,p2,pi1,pi2,ao2,ci1,ci2].join(',') + '\n');
             sendCommand('SETDIV ' + document.getElementById('clk-div-ratio').value + '\n');
         });
 
@@ -1652,6 +1687,10 @@
                 'CV controls string frequencies and CV outputs together (default)',
                 'CV only sets root for arpeggio/root/pitch CV outputs; strings stay at X knob pitch'
             ],
+            ci2: [
+                'CV adds to Y knob for damping/decay control (default)',
+                'CV adds to Main knob for wet/dry mix control'
+            ],
             cv1: [
                 'rotating chord tones as 1V/oct CV',
                 'fundamental pitch only, tracks pitch knob and CV input',
@@ -1659,7 +1698,7 @@
                 'tracks raw audio input amplitude',
                 'random voltage, new value on each chord change',
                 'samples CV input 1 on pulse input 1 trigger, holds until next trigger',
-                'zero-crossing pitch detection, 1V/oct output — patch to CV In 1 for pitch tracking'
+                'YIN pitch detection, 1V/oct output — patch to CV In 1 for pitch tracking'
             ],
             cv2: [
                 'rotating chord tones as 1V/oct CV',
@@ -1668,12 +1707,12 @@
                 'tracks raw audio input amplitude',
                 'random voltage, new value on each chord change',
                 'samples CV input 1 on pulse input 1 trigger, holds until next trigger',
-                'zero-crossing pitch detection, 1V/oct output — patch to CV In 1 for pitch tracking'
+                'YIN pitch detection, 1V/oct output — patch to CV In 1 for pitch tracking'
             ],
             ao2: [
-                'normal stereo audio output',
-                'resonator envelope as CV (audio goes mono)',
-                'input envelope as CV (audio goes mono)'
+                'second audio channel, use with Audio out 1 for stereo mid/side pair',
+                'resonator envelope as CV',
+                'input envelope as CV'
             ],
             p1: [
                 'Schmitt trigger on input transients, 5ms pulse with 50ms lockout',
@@ -1705,6 +1744,7 @@
         // Conditional row visibility and description updates
         function updateConditionalRows() {
             const ci1 = document.getElementById('ci1-mode').value;
+            const ci2 = document.getElementById('ci2-mode').value;
             const cv1 = document.getElementById('cv1-mode').value;
             const cv2 = document.getElementById('cv2-mode').value;
             const ao2 = document.getElementById('ao2-mode').value;
@@ -1713,14 +1753,15 @@
             const pi1 = document.getElementById('pi1-mode').value;
             const pi2 = document.getElementById('pi2-mode').value;
 
-            // Show arp settings when either CV output is set to arpeggio pitch
-            const showArp = (cv1 === '0') || (cv2 === '0');
-            document.getElementById('arp-settings-row').style.display = showArp ? '' : 'none';
+            // Show arp settings under each CV output that has arpeggio selected
+            document.getElementById('arp-settings-row-1').style.display = (cv1 === '0') ? '' : 'none';
+            document.getElementById('arp-settings-row-2').style.display = (cv2 === '0') ? '' : 'none';
             // Show clock divider ratio when P2 is set to clock divider
             document.getElementById('clk-div-row').style.display = (p2 === '4') ? '' : 'none';
 
             // Update description text
             document.getElementById('ci1-desc').textContent = modeDescs.ci1[ci1] || '';
+            document.getElementById('ci2-desc').textContent = modeDescs.ci2[ci2] || '';
             document.getElementById('cv1-desc').textContent = modeDescs.cv1[cv1] || '';
             document.getElementById('cv2-desc').textContent = modeDescs.cv2[cv2] || '';
             document.getElementById('ao2-desc').textContent = modeDescs.ao2[ao2] || '';
@@ -1739,6 +1780,7 @@
         }
 
         document.getElementById('ci1-mode').addEventListener('change', onModeChange);
+        document.getElementById('ci2-mode').addEventListener('change', onModeChange);
         document.getElementById('cv1-mode').addEventListener('change', onModeChange);
         document.getElementById('cv2-mode').addEventListener('change', onModeChange);
         document.getElementById('ao2-mode').addEventListener('change', onModeChange);
@@ -1746,8 +1788,10 @@
         document.getElementById('p2-mode').addEventListener('change', onModeChange);
         document.getElementById('pi1-mode').addEventListener('change', onModeChange);
         document.getElementById('pi2-mode').addEventListener('change', onModeChange);
-        document.getElementById('arp-pattern').addEventListener('change', onModeChange);
-        document.getElementById('arp-division').addEventListener('change', onModeChange);
+        document.getElementById('arp-pattern-1').addEventListener('change', onModeChange);
+        document.getElementById('arp-division-1').addEventListener('change', onModeChange);
+        document.getElementById('arp-pattern-2').addEventListener('change', onModeChange);
+        document.getElementById('arp-division-2').addEventListener('change', onModeChange);
         document.getElementById('clk-div-ratio').addEventListener('change', onModeChange);
         updateConditionalRows();
 
