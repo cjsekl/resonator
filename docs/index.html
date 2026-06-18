@@ -1035,14 +1035,48 @@
 
     <section id="outputsContent" style="display:none">
         <hr>
-        <p>CV output 1 &mdash;
+        <p>Audio in 1 &mdash;
+            <span class="mode-desc">audio excitation source (mixed with Audio in 2)</span>
+        </p>
+        <hr>
+        <p>Audio in 2 &mdash;
+            <span class="mode-desc">audio excitation source (mixed with Audio in 1)</span>
+        </p>
+        <hr>
+        <p>Audio out 1 &mdash;
+            <span class="mode-desc">main resonator mix output</span>
+        </p>
+        <hr>
+        <p>Audio out 2 &mdash;
+            <select id="ao2-mode">
+                <option value="0" selected>stereo audio</option>
+                <option value="1">resonator envelope</option>
+                <option value="2">input envelope</option>
+            </select>
+            <span class="mode-desc" id="ao2-desc"></span>
+        </p>
+        <hr>
+        <p>CV in 1 &mdash;
+            <select id="ci1-mode">
+                <option value="0" selected>1V/oct pitch</option>
+                <option value="1">arpeggio root only</option>
+            </select>
+            <span class="mode-desc" id="ci1-desc"></span>
+        </p>
+        <hr>
+        <p>CV in 2 &mdash;
+            <span class="mode-desc">damping control (added to Y knob)</span>
+        </p>
+        <hr>
+        <p>CV out 1 &mdash;
             <select id="cv1-mode">
                 <option value="0" selected>arpeggio pitch</option>
                 <option value="1">root pitch</option>
-                <option value="2">envelope follower</option>
-                <option value="3">random S&amp;H</option>
-                <option value="4">pitch S&amp;H</option>
-                <option value="5">pitch track</option>
+                <option value="2">resonator envelope</option>
+                <option value="3">input envelope</option>
+                <option value="4">random S&amp;H</option>
+                <option value="5">pitch S&amp;H</option>
+                <option value="6">pitch track</option>
             </select>
             <span class="mode-desc" id="cv1-desc"></span>
         </p>
@@ -1062,27 +1096,39 @@
             </select>
         steps</p>
         <hr>
-        <p>CV output 2 &mdash;
+        <p>CV out 2 &mdash;
             <select id="cv2-mode">
-                <option value="0" selected>resonator envelope</option>
-                <option value="1">input envelope</option>
-                <option value="2">arpeggio pitch</option>
-                <option value="3">root pitch</option>
-                <option value="4">pitch track</option>
+                <option value="0" selected>arpeggio pitch</option>
+                <option value="1">root pitch</option>
+                <option value="2">resonator envelope</option>
+                <option value="3">input envelope</option>
+                <option value="4">random S&amp;H</option>
+                <option value="5">pitch S&amp;H</option>
+                <option value="6">pitch track</option>
             </select>
             <span class="mode-desc" id="cv2-desc"></span>
         </p>
         <hr>
-        <p>Audio out 2 &mdash;
-            <select id="ao2-mode">
-                <option value="0" selected>stereo audio</option>
-                <option value="1">resonator envelope</option>
-                <option value="2">input envelope</option>
+        <p>Pulse in 1 &mdash;
+            <select id="pi1-mode">
+                <option value="0" selected>noise burst / pluck</option>
+                <option value="1">advance chord</option>
+                <option value="2">reset to first chord</option>
             </select>
-            <span class="mode-desc" id="ao2-desc"></span>
+            <span class="mode-desc" id="pi1-desc"></span>
         </p>
         <hr>
-        <p>Pulse output 1 &mdash;
+        <p>Pulse in 2 &mdash;
+            <select id="pi2-mode">
+                <option value="0" selected>advance chord</option>
+                <option value="1">advance arp step</option>
+                <option value="2">noise burst / pluck</option>
+                <option value="3">reset to first chord</option>
+            </select>
+            <span class="mode-desc" id="pi2-desc"></span>
+        </p>
+        <hr>
+        <p>Pulse out 1 &mdash;
             <select id="p1-mode">
                 <option value="0" selected>audio trigger</option>
                 <option value="1">tap tempo clock</option>
@@ -1092,7 +1138,7 @@
             <span class="mode-desc" id="p1-desc"></span>
         </p>
         <hr>
-        <p>Pulse output 2 &mdash;
+        <p>Pulse out 2 &mdash;
             <select id="p2-mode">
                 <option value="0" selected>chord change trigger</option>
                 <option value="1">tap tempo clock</option>
@@ -1111,25 +1157,6 @@
                 <option value="4">4</option>
                 <option value="8">8</option>
             </select>
-        </p>
-        <hr>
-        <p>Pulse input 1 &mdash;
-            <select id="pi1-mode">
-                <option value="0" selected>noise burst / pluck</option>
-                <option value="1">advance chord</option>
-                <option value="2">reset to first chord</option>
-            </select>
-            <span class="mode-desc" id="pi1-desc"></span>
-        </p>
-        <hr>
-        <p>Pulse input 2 &mdash;
-            <select id="pi2-mode">
-                <option value="0" selected>advance chord</option>
-                <option value="1">advance arp step</option>
-                <option value="2">noise burst / pluck</option>
-                <option value="3">reset to first chord</option>
-            </select>
-            <span class="mode-desc" id="pi2-desc"></span>
         </p>
         <hr>
         <button class="outputs-save-btn" id="outputs-save-btn" disabled>Save to device</button>
@@ -1287,6 +1314,9 @@
                     document.getElementById('pi2-mode').value = String(vals[5]);
                     if (vals.length >= 7) {
                         document.getElementById('ao2-mode').value = String(vals[6]);
+                    }
+                    if (vals.length >= 8) {
+                        document.getElementById('ci1-mode').value = String(vals[7]);
                     }
                     updateConditionalRows();
                 }
@@ -1611,25 +1641,33 @@
             const pi1 = document.getElementById('pi1-mode').value;
             const pi2 = document.getElementById('pi2-mode').value;
             const ao2 = document.getElementById('ao2-mode').value;
-            sendCommand('SETOUT ' + [cv1,cv2,p1,p2,pi1,pi2,ao2].join(',') + '\n');
+            const ci1 = document.getElementById('ci1-mode').value;
+            sendCommand('SETOUT ' + [cv1,cv2,p1,p2,pi1,pi2,ao2,ci1].join(',') + '\n');
             sendCommand('SETDIV ' + document.getElementById('clk-div-ratio').value + '\n');
         });
 
         // Description text for each mode
         const modeDescs = {
+            ci1: [
+                'CV controls string frequencies and CV outputs together (default)',
+                'CV only sets root for arpeggio/root/pitch CV outputs; strings stay at X knob pitch'
+            ],
             cv1: [
                 'rotating chord tones as 1V/oct CV',
                 'fundamental pitch only, tracks pitch knob and CV input',
                 'tracks resonator output amplitude',
+                'tracks raw audio input amplitude',
                 'random voltage, new value on each chord change',
                 'samples CV input 1 on pulse input 1 trigger, holds until next trigger',
                 'zero-crossing pitch detection, 1V/oct output — patch to CV In 1 for pitch tracking'
             ],
             cv2: [
-                'tracks resonator output amplitude',
-                'tracks raw audio input amplitude',
                 'rotating chord tones as 1V/oct CV',
                 'fundamental pitch only, tracks pitch knob and CV input',
+                'tracks resonator output amplitude',
+                'tracks raw audio input amplitude',
+                'random voltage, new value on each chord change',
+                'samples CV input 1 on pulse input 1 trigger, holds until next trigger',
                 'zero-crossing pitch detection, 1V/oct output — patch to CV In 1 for pitch tracking'
             ],
             ao2: [
@@ -1666,6 +1704,7 @@
 
         // Conditional row visibility and description updates
         function updateConditionalRows() {
+            const ci1 = document.getElementById('ci1-mode').value;
             const cv1 = document.getElementById('cv1-mode').value;
             const cv2 = document.getElementById('cv2-mode').value;
             const ao2 = document.getElementById('ao2-mode').value;
@@ -1675,12 +1714,13 @@
             const pi2 = document.getElementById('pi2-mode').value;
 
             // Show arp settings when either CV output is set to arpeggio pitch
-            const showArp = (cv1 === '0') || (cv2 === '2');
+            const showArp = (cv1 === '0') || (cv2 === '0');
             document.getElementById('arp-settings-row').style.display = showArp ? '' : 'none';
             // Show clock divider ratio when P2 is set to clock divider
             document.getElementById('clk-div-row').style.display = (p2 === '4') ? '' : 'none';
 
             // Update description text
+            document.getElementById('ci1-desc').textContent = modeDescs.ci1[ci1] || '';
             document.getElementById('cv1-desc').textContent = modeDescs.cv1[cv1] || '';
             document.getElementById('cv2-desc').textContent = modeDescs.cv2[cv2] || '';
             document.getElementById('ao2-desc').textContent = modeDescs.ao2[ao2] || '';
@@ -1698,6 +1738,7 @@
             }
         }
 
+        document.getElementById('ci1-mode').addEventListener('change', onModeChange);
         document.getElementById('cv1-mode').addEventListener('change', onModeChange);
         document.getElementById('cv2-mode').addEventListener('change', onModeChange);
         document.getElementById('ao2-mode').addEventListener('change', onModeChange);

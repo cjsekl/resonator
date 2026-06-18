@@ -10,8 +10,8 @@ static volatile int16_t yinRing[YIN_RING_SIZE];  // audio sample ring buffer
 static volatile uint32_t yinRingHead;             // write index (Core 0)
 static volatile int32_t yinSharedPitchMV;         // pitch result (Core 1 writes, Core 0 reads)
 
-// YIN circular buffer in SRAM4 scratch RAM (after core1_stack at 0x20040000)
-static int16_t* const yinBuf = (int16_t*)0x20040800;
+// YIN circular buffer (1024 entries, in main SRAM to avoid SRAM4 conflicts)
+static int16_t yinBuf[1024];
 
 // Delay lookup table for 1V/oct pitch control
 // 341 entries per octave, inverse exponential curve

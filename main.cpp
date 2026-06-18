@@ -3,18 +3,18 @@
 // --- Hot-path methods (same TU as ProcessSample for inlining) ---
 
 void ResonatingStrings::updateNeedsFlags() {
-    needsArpMV = (cv1Mode == CV1_ARP || cv2Mode == CV2_ARP);
-    needsRootMV = needsArpMV || cv1Mode == CV1_ROOT || cv2Mode == CV2_ROOT;
-    needsResEnv = (cv1Mode == CV1_ENVELOPE || cv2Mode == CV2_RES_ENV || ao2Mode == AO2_RES_ENV);
-    needsInEnv = (cv2Mode == CV2_IN_ENV || ao2Mode == AO2_IN_ENV);
-    needsPitchTrack = (cv1Mode == CV1_PITCH_TRACK || cv2Mode == CV2_PITCH_TRACK);
+    needsArpMV = (cv1Mode == CVOUT_ARP || cv2Mode == CVOUT_ARP);
+    needsRootMV = needsArpMV || cv1Mode == CVOUT_ROOT || cv2Mode == CVOUT_ROOT;
+    needsResEnv = (cv1Mode == CVOUT_RES_ENV || cv2Mode == CVOUT_RES_ENV || ao2Mode == AO2_RES_ENV);
+    needsInEnv = (cv1Mode == CVOUT_IN_ENV || cv2Mode == CVOUT_IN_ENV || ao2Mode == AO2_IN_ENV);
+    needsPitchTrack = (cv1Mode == CVOUT_PITCH_TRACK || cv2Mode == CVOUT_PITCH_TRACK);
     needsAudioTrig = (p1Mode == P1_AUDIO_TRIG || p2Mode == P2_AUDIO_TRIG);
     needsOnset = (p1Mode == P1_ONSET || p2Mode == P2_ONSET);
     needsTapClock = (p1Mode == P1_TAP_CLOCK || p2Mode == P2_TAP_CLOCK);
     needsArpClock = (p1Mode == P1_ARP_CLOCK || p2Mode == P2_ARP_CLOCK);
     needsClkDiv = (p2Mode == P2_CLK_DIV);
     needsChordDetect = needsArpMV || needsArpClock || needsTapClock ||
-                       p2Mode == P2_CHORD_TRIG || cv1Mode == CV1_RANDOM_SH;
+                       p2Mode == P2_CHORD_TRIG || cv1Mode == CVOUT_RANDOM_SH || cv2Mode == CVOUT_RANDOM_SH;
     needsAudioAbs = needsAudioTrig || needsOnset || needsInEnv;
 }
 
@@ -91,8 +91,8 @@ ResonatingStrings::ResonatingStrings() : writeIndex1(0), writeIndex2(0), writeIn
                       arpRotation(0), envFollower(0), triggerArmed(true),
                       trigPulseCounter(0), prevProgressionIndex(0), chordPulseCounter(0),
                       chordPeriod(0), chordTimer(0), arpStepCounter(0), arpDivision(4), arpPattern(0), arpSettingsChanged(false), arpRandomString(0),
-                      cv1Mode(CV1_ARP), cv2Mode(CV2_RES_ENV), p1Mode(P1_AUDIO_TRIG), p2Mode(P2_CHORD_TRIG),
-                      pi1Mode(PI1_PLUCK), pi2Mode(PI2_ADVANCE), ao2Mode(AO2_AUDIO), outputModesChanged(false),
+                      cv1Mode(CVOUT_ARP), cv2Mode(CVOUT_RES_ENV), p1Mode(P1_AUDIO_TRIG), p2Mode(P2_CHORD_TRIG),
+                      pi1Mode(PI1_PLUCK), pi2Mode(PI2_ADVANCE), ao2Mode(AO2_AUDIO), ci1Mode(CI1_VOCT), outputModesChanged(false),
                       clockCounter(0), tapClockPulseCounter(0),
                       randomSHValue(0), arpClockPulseCounter(0),
                       pitchSHValue(0), clockDivCount(0), clockDivRatio(2), clockDivPulseCounter(0),
@@ -223,28 +223,33 @@ void ResonatingStrings::ProcessSample() {
     // FREQUENCY CONTROL - 1V/oct
     // CV1: ±6V maps to -2048 to 2047
     int32_t pitchCV;
+    int32_t stringPitch;
 
     if (Disconnected(Input::CV1)) {
         // No CV connected: X knob controls C1-C7 range
         // Map knob 0-4095 to pitchCV 2048-4095 (6 octaves)
         pitchCV = 2048 + (KnobVal(X) / 2);
-    } else {
-        // CV connected: X knob is fine tune (±1 octave)
-        // 1 octave = 341 steps
+        stringPitch = pitchCV;
+    } else if (ci1Mode == CI1_VOCT) {
+        // CV controls strings + outputs
+        // X knob is fine tune (±1 octave), 1 octave = 341 steps
         int32_t fineTune = ((KnobVal(X) - 2048) * 341) / 2048;
-
-        // CV input with 1V/oct scaling
-        // CVIn1 range: -2048 to +2047 for ±6V, so 1V = 341 counts
         int32_t scaledCV = CVIn1();
-
         pitchCV = 2048 + scaledCV + fineTune;
+        stringPitch = pitchCV;
+    } else {
+        // CI1_ARP_ONLY: knob sets string pitch, CV sets output pitch
+        stringPitch = 2048 + (KnobVal(X) / 2);
+        pitchCV = 2048 + CVIn1();
     }
 
+    if (stringPitch > 4095) stringPitch = 4095;
+    if (stringPitch < 0) stringPitch = 0;
     if (pitchCV > 4095) pitchCV = 4095;
     if (pitchCV < 0) pitchCV = 0;
 
     // Get delay from exponential lookup table (1V/oct)
-    int32_t baseDelay = ExpDelay(pitchCV);
+    int32_t baseDelay = ExpDelay(stringPitch);
 
     // Clamp to usable range
     const int MIN_DELAY = 15;
@@ -419,7 +424,7 @@ void ResonatingStrings::ProcessSample() {
     }
 
     // Pitch S&H: capture CV In 1 on Pulse In 1 rising edge
-    if (pulseIn1Rising && cv1Mode == CV1_PITCH_SH) {
+    if (pulseIn1Rising && (cv1Mode == CVOUT_PITCH_SH || cv2Mode == CVOUT_PITCH_SH)) {
         pitchSHValue = (pitchCV - 3069) * 12014 >> 12;
     }
 
@@ -571,22 +576,25 @@ void ResonatingStrings::ProcessSample() {
     // CV Out 1
     switch (cv1Mode) {
         default:
-        case CV1_ARP:       CVOut1Millivolts(arpMV); break;
-        case CV1_ROOT:      CVOut1Millivolts(rootMV); break;
-        case CV1_ENVELOPE:  CVOut1((int16_t)(envFollower >> 16)); break;
-        case CV1_RANDOM_SH: CVOut1Millivolts(randomSHValue); break;
-        case CV1_PITCH_SH:  CVOut1Millivolts(pitchSHValue); break;
-        case CV1_PITCH_TRACK: CVOut1Millivolts(yinSharedPitchMV); break;
+        case CVOUT_ARP:        CVOut1Millivolts(arpMV); break;
+        case CVOUT_ROOT:       CVOut1Millivolts(rootMV); break;
+        case CVOUT_RES_ENV:    CVOut1((int16_t)(envFollower >> 16)); break;
+        case CVOUT_IN_ENV:     CVOut1((int16_t)(inputEnvFollower >> 16)); break;
+        case CVOUT_RANDOM_SH:  CVOut1Millivolts(randomSHValue); break;
+        case CVOUT_PITCH_SH:   CVOut1Millivolts(pitchSHValue); break;
+        case CVOUT_PITCH_TRACK: CVOut1Millivolts(yinSharedPitchMV); break;
     }
 
     // CV Out 2
     switch (cv2Mode) {
         default:
-        case CV2_RES_ENV:   CVOut2((int16_t)(envFollower >> 16)); break;
-        case CV2_IN_ENV:    CVOut2((int16_t)(inputEnvFollower >> 16)); break;
-        case CV2_ARP:       CVOut2Millivolts(arpMV); break;
-        case CV2_ROOT:      CVOut2Millivolts(rootMV); break;
-        case CV2_PITCH_TRACK: CVOut2Millivolts(yinSharedPitchMV); break;
+        case CVOUT_ARP:        CVOut2Millivolts(arpMV); break;
+        case CVOUT_ROOT:       CVOut2Millivolts(rootMV); break;
+        case CVOUT_RES_ENV:    CVOut2((int16_t)(envFollower >> 16)); break;
+        case CVOUT_IN_ENV:     CVOut2((int16_t)(inputEnvFollower >> 16)); break;
+        case CVOUT_RANDOM_SH:  CVOut2Millivolts(randomSHValue); break;
+        case CVOUT_PITCH_SH:   CVOut2Millivolts(pitchSHValue); break;
+        case CVOUT_PITCH_TRACK: CVOut2Millivolts(yinSharedPitchMV); break;
     }
 
     // Audio Out 2 (as CV)
@@ -671,20 +679,23 @@ void core1_handler() {
     int linePos = 0;
 
     // YIN pitch detector state (all local to Core 1)
-    const int YIN_W = 150;
+    const int YIN_W = 300;
     const int YIN_MIN_LAG = 8;
-    const int YIN_MAX_LAG = 150;
+    const int YIN_MAX_LAG = 300;
 
     int32_t hp_state = 0, lp1_state = 0, lp2_state = 0;
     int bufIdx = 0, decCount = 0;
+    int decSampleCount = 0;     // total decimated samples produced
     int scanLag = 0;
+    int scanWaitUntil = 0;      // don't rescan until decSampleCount reaches this
     int64_t runningSum = 0, prevNorm = 0, prevPrevNorm = 0;
     bool foundDip = false;
     int32_t pitchMV = 0;
-    int32_t yinAmplitude = 0;   // peak-hold envelope of decimated signal
+    int32_t yinAmplitude = 0;   // fast-tracking envelope of decimated signal
+    int32_t yinPeakAmp = 0;     // peak amplitude for current note (resets on snap)
     uint32_t ringTail = 0;
 
-    for (int i = 0; i < 512; i++) yinBuf[i] = 0;
+    for (int i = 0; i < 1024; i++) yinBuf[i] = 0;
 
     while (true) {
         // Process all pending audio samples from Core 0
@@ -701,26 +712,31 @@ void core1_handler() {
             if (++decCount >= 4) {
                 decCount = 0;
                 yinBuf[bufIdx] = (int16_t)lp2_state;
-                bufIdx = (bufIdx + 1) & 511;
-                // Peak-hold amplitude for pitch gate
+                bufIdx = (bufIdx + 1) & 1023;
+                decSampleCount++;
+                // Fast-tracking amplitude envelope
                 int32_t absVal = lp2_state < 0 ? -lp2_state : lp2_state;
                 if (absVal > yinAmplitude) {
                     yinAmplitude = absVal;                    // instant attack
                 } else {
-                    yinAmplitude -= yinAmplitude >> 11;       // release τ ≈ 170ms at 12kHz
+                    yinAmplitude -= yinAmplitude >> 9;        // release τ ≈ 42ms at 12kHz
                 }
+                // Track peak for current note (slow decay so quieter notes can be tracked)
+                if (yinAmplitude > yinPeakAmp) yinPeakAmp = yinAmplitude;
+                else yinPeakAmp -= yinPeakAmp >> 13;  // release τ ≈ 680ms at 12kHz
             }
         }
 
         // Compute up to 4 YIN lags per iteration (full window each, no chunking)
-        if (scanLag <= YIN_MAX_LAG && ringTail > 0) {
-            int base = (bufIdx - 1) & 511;
+        // Rate-limit: wait for half a window of fresh samples before rescanning
+        if (scanLag <= YIN_MAX_LAG && decSampleCount >= scanWaitUntil) {
+            int base = (bufIdx - 1) & 1023;
             for (int n = 0; n < 4 && scanLag <= YIN_MAX_LAG; n++) {
                 uint64_t sum = 0;
                 int lag = scanLag;
                 for (int i = 0; i < YIN_W; i++) {
-                    int idx1 = (base - i) & 511;
-                    int idx2 = (idx1 - lag) & 511;
+                    int idx1 = (base - i) & 1023;
+                    int idx2 = (idx1 - lag) & 1023;
                     int32_t diff = (int32_t)yinBuf[idx1] - yinBuf[idx2];
                     sum += (uint32_t)diff * (uint32_t)diff;
                 }
@@ -750,15 +766,20 @@ void core1_handler() {
                                 period_fp8 = ((scanLag - 1) * 4) << 8;
                             }
                             int32_t newMV = periodToMillivoltsFrac(period_fp8);
-                            if (yinAmplitude > 40) {            // gate: hold pitch when signal is too weak
-                                int32_t diff = newMV - pitchMV;
-                                if (diff > 30 || diff < -30) {
-                                    pitchMV = newMV;            // snap to new note (>30mV ≈ half semitone)
-                                } else {
-                                    pitchMV += (diff + 2) >> 2; // gentle smoothing within a note
-                                }
+                            int32_t diff = newMV - pitchMV;
+                            int32_t absDiff = diff < 0 ? -diff : diff;
+
+                            if (absDiff > 80 && yinAmplitude > (yinPeakAmp >> 1)) {
+                                // New note: large change + still strong → snap
+                                pitchMV = newMV;
+                                yinPeakAmp = yinAmplitude;  // reset peak for new note
+                                yinSharedPitchMV = pitchMV;
+                            } else if (yinAmplitude > (yinPeakAmp >> 1)) {
+                                // Near peak: smooth toward detection
+                                pitchMV += (diff + 8) >> 4;
                                 yinSharedPitchMV = pitchMV;
                             }
+                            // else: signal has decayed below half peak — hold last pitch
                             detected = true;
                         }
                         foundDip = foundDip || belowThreshold;
@@ -772,6 +793,7 @@ void core1_handler() {
                     prevNorm = 0;
                     prevPrevNorm = 0;
                     foundDip = false;
+                    scanWaitUntil = decSampleCount + (YIN_W / 2); // wait for fresh audio
                     break;
                 }
                 scanLag++;
@@ -782,6 +804,7 @@ void core1_handler() {
                 prevNorm = 0;
                 prevPrevNorm = 0;
                 foundDip = false;
+                scanWaitUntil = decSampleCount + (YIN_W / 2);
             }
         }
 

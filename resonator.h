@@ -88,13 +88,14 @@ private:
     int arpRandomString;       // cached random string index, updated on arp step
 
     // Configurable I/O modes
-    volatile int cv1Mode;      // CV1Mode enum
-    volatile int cv2Mode;      // CV2Mode enum
+    volatile int cv1Mode;      // CVOutMode enum
+    volatile int cv2Mode;      // CVOutMode enum
     volatile int p1Mode;       // P1Mode enum
     volatile int p2Mode;       // P2Mode enum
     volatile int pi1Mode;      // PI1Mode enum
     volatile int pi2Mode;      // PI2Mode enum
     volatile int ao2Mode;      // AO2Mode enum
+    volatile int ci1Mode;      // CI1Mode enum
     volatile bool outputModesChanged;
 
     // Tap tempo clock state
