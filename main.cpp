@@ -700,6 +700,8 @@ void core1_handler() {
     int32_t pitchMV = 0;
     int32_t yinAmplitude = 0;   // fast-tracking envelope of decimated signal
     int32_t yinPeakAmp = 0;     // peak amplitude for current note (resets on snap)
+    int32_t yinSlowAmp = 0;     // slow amplitude baseline for onset/attack detection
+    int yinAttackHold = 0;      // counts down (decimated samples) after an onset transient
     uint32_t ringTail = 0;
 
     for (int i = 0; i < 1024; i++) yinBuf[i] = 0;
@@ -731,6 +733,11 @@ void core1_handler() {
                 // Track peak for current note (slow decay so quieter notes can be tracked)
                 if (yinAmplitude > yinPeakAmp) yinPeakAmp = yinAmplitude;
                 else yinPeakAmp -= yinPeakAmp >> 13;  // release τ ≈ 680ms at 12kHz
+                // Slow baseline + attack (onset) detection: a fresh pluck rises well above
+                // the recent average; hold the flag ~40ms so a new-note detection can use it.
+                yinSlowAmp += (yinAmplitude - yinSlowAmp) >> 8;  // τ ≈ 21ms at 12kHz
+                if (yinAmplitude > yinSlowAmp + (yinSlowAmp >> 1)) yinAttackHold = 480;
+                else if (yinAttackHold > 0) yinAttackHold--;
             }
         }
 
@@ -755,8 +762,9 @@ void core1_handler() {
                     if (scanLag >= YIN_MIN_LAG) {
                         // CMND: d'(τ) = d(τ)*τ / runningSum
                         int64_t dTimesLag = d * (int64_t)scanLag;
-                        int64_t lhs = (dTimesLag << 3) + (dTimesLag << 1); // ×10
-                        bool belowThreshold = (lhs < runningSum);
+                        // CMND < 0.125: keeps the true-period dip qualifying further into
+                        // a sustain (raised from 0.10 to reduce octave-down lock-on).
+                        bool belowThreshold = ((dTimesLag << 3) < runningSum);
                         // Detect first local minimum after crossing below threshold
                         if (foundDip && dTimesLag > prevNorm) {
                             // Parabolic interpolation for sub-sample lag precision
@@ -776,7 +784,14 @@ void core1_handler() {
                             int32_t diff = newMV - pitchMV;
                             int32_t absDiff = diff < 0 ? -diff : diff;
 
-                            if (absDiff > 80 && yinAmplitude > (yinPeakAmp >> 1)) {
+                            // Octave-down guard: a detection ~1 octave below (−1000mV, ±60mV)
+                            // mid-sustain is almost always a YIN octave error, not a real note.
+                            // Allow it only right after an onset transient (a genuine new pluck).
+                            bool spuriousOctaveDown = (diff < -940 && diff > -1060 && yinAttackHold == 0);
+
+                            if (spuriousOctaveDown) {
+                                // Reject: hold current pitch
+                            } else if (absDiff > 80 && yinAmplitude > (yinPeakAmp >> 1)) {
                                 // New note: large change + still strong → snap
                                 pitchMV = newMV;
                                 yinPeakAmp = yinAmplitude;  // reset peak for new note
