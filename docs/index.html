@@ -1237,15 +1237,38 @@
         if (!("serial" in navigator)) {
             document.getElementById("noSerial").style.display = "block";
             document.getElementById("mainContent").style.display = "none";
+        } else {
+            // Detect physical unplug / device removal
+            navigator.serial.addEventListener("disconnect", (e) => {
+                if (port && e.target === port) handleDisconnect();
+            });
         }
 
         connectBtn.addEventListener("click", async () => {
             if (port) {
-                await disconnect();
+                await handleDisconnect();
             } else {
                 await connect();
             }
         });
+
+        function updateConnectionUI(connected) {
+            if (connected) {
+                statusEl.textContent = "Connected";
+                statusEl.className = "connected";
+                connectBtn.textContent = "Disconnect";
+                connectBtn.className = "connected";
+                sendBtn.disabled = getProgressionIds().length === 0;
+                document.getElementById('outputs-save-btn').disabled = false;
+            } else {
+                statusEl.textContent = "Disconnected";
+                statusEl.className = "";
+                connectBtn.textContent = "Connect USB";
+                connectBtn.className = "";
+                sendBtn.disabled = true;
+                document.getElementById('outputs-save-btn').disabled = true;
+            }
+        }
 
         async function connect() {
             try {
@@ -1254,15 +1277,12 @@
 
                 writer = port.writable.getWriter();
                 const textDecoder = new TextDecoderStream();
-                port.readable.pipeTo(textDecoder.writable);
+                // pipeTo rejects when the port closes/drops — swallow to avoid an
+                // unhandled rejection; readLoop handles the UI side of the drop.
+                port.readable.pipeTo(textDecoder.writable).catch(() => {});
                 reader = textDecoder.readable.getReader();
 
-                statusEl.textContent = "Connected";
-                statusEl.className = "connected";
-                connectBtn.textContent = "Disconnect";
-                connectBtn.className = "connected";
-                sendBtn.disabled = getProgressionIds().length === 0;
-                document.getElementById('outputs-save-btn').disabled = false;
+                updateConnectionUI(true);
 
                 readLoop();
                 sendCommand("GET\n");
@@ -1275,20 +1295,21 @@
             }
         }
 
-        async function disconnect() {
-            try {
-                if (reader) { await reader.cancel(); reader = null; }
-                if (writer) { writer.releaseLock(); writer = null; }
-                if (port) { await port.close(); port = null; }
-            } catch (e) {
-                console.error("Disconnect error:", e);
-            }
-            statusEl.textContent = "Disconnected";
-            statusEl.className = "";
-            connectBtn.textContent = "Connect USB";
-            connectBtn.className = "";
-            sendBtn.disabled = true;
-            document.getElementById('outputs-save-btn').disabled = true;
+        // Single teardown path for both manual disconnect and unexpected drops
+        // (unplug, read/write error). Idempotent: safe to call from several places.
+        let disconnecting = false;
+        async function handleDisconnect() {
+            if (disconnecting || !port) return;
+            disconnecting = true;
+            try { if (reader) await reader.cancel(); } catch (e) {}
+            try { if (writer) writer.releaseLock(); } catch (e) {}
+            try { if (port) await port.close(); } catch (e) {}
+            reader = null;
+            writer = null;
+            port = null;
+            readBuffer = "";
+            updateConnectionUI(false);
+            disconnecting = false;
         }
 
         async function readLoop() {
@@ -1304,7 +1325,10 @@
                     }
                 }
             } catch (e) {
-                if (port) console.error("Read error:", e);
+                // read errored — connection lost
+            } finally {
+                // Stream ended (done) or threw: the connection is gone, reflect it in the UI
+                handleDisconnect();
             }
         }
 
@@ -1357,7 +1381,12 @@
         async function sendCommand(cmd) {
             if (!writer) return;
             const encoder = new TextEncoder();
-            await writer.write(encoder.encode(cmd));
+            try {
+                await writer.write(encoder.encode(cmd));
+            } catch (e) {
+                // Write failed — device is gone; surface the lost connection
+                handleDisconnect();
+            }
         }
 
         sendBtn.addEventListener("click", (e) => {
@@ -1697,7 +1726,7 @@
                 'tracks resonator output amplitude',
                 'tracks raw audio input amplitude',
                 'random voltage, new value on each chord change',
-                'samples CV input 1 on pulse input 1 trigger, holds until next trigger',
+                'samples the pitch CV (knob + CV In 1) on pulse input 1, holds until next trigger',
                 'YIN pitch detection, 1V/oct output — patch to CV In 1 for pitch tracking'
             ],
             cv2: [
@@ -1706,7 +1735,7 @@
                 'tracks resonator output amplitude',
                 'tracks raw audio input amplitude',
                 'random voltage, new value on each chord change',
-                'samples CV input 1 on pulse input 1 trigger, holds until next trigger',
+                'samples the pitch CV (knob + CV In 1) on pulse input 1, holds until next trigger',
                 'YIN pitch detection, 1V/oct output — patch to CV In 1 for pitch tracking'
             ],
             ao2: [
@@ -1718,7 +1747,7 @@
                 'Schmitt trigger on input transients, 5ms pulse with 50ms lockout',
                 'free-running clock at the chord-change rate',
                 'pulse on each arpeggio step change',
-                'fires on note onsets, works with sustained instruments like guitar'
+                'fires on note onsets, works with sustained and layered audio (~100ms min spacing)'
             ],
             p2: [
                 'fires when progression advances',
@@ -1726,7 +1755,7 @@
                 'Schmitt trigger on input transients, 5ms pulse with 50ms lockout',
                 'pulse on each arpeggio step change',
                 'divides pulse input 2 by a selectable ratio',
-                'fires on note onsets, works with sustained instruments like guitar'
+                'fires on note onsets, works with sustained and layered audio (~100ms min spacing)'
             ],
             pi1: [
                 'excites all four strings with a decaying noise burst',
