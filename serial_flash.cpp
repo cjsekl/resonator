@@ -1,11 +1,28 @@
 #define COMPUTERCARD_NOIMPL
 #include "resonator.h"
 
-// Check and perform deferred flash save (called from Core 1)
+// Mark settings dirty so Core 1's idle loop performs one debounced flash save.
+// Called from the serial command handlers (Core 1) instead of writing immediately,
+// so a burst of commands collapses into a single flash erase/program.
+void ResonatingStrings::markFlashDirty() {
+    flashDirtyTime = to_ms_since_boot(get_absolute_time());
+    flashDirty = true;
+}
+
+// Check and perform deferred flash save (called from Core 1 on serial idle)
 void ResonatingStrings::checkPendingFlashSave() {
     if (pendingFlashSave) {
+        // Reset-to-defaults (single event from Core 0): save immediately
         pendingFlashSave = false;
+        flashDirty = false;
         saveProgressionToFlash();
+    } else if (flashDirty) {
+        // Debounced settings save: write once the changes have settled
+        uint32_t now = to_ms_since_boot(get_absolute_time());
+        if (now - flashDirtyTime >= FLASH_DEBOUNCE_MS) {
+            flashDirty = false;
+            saveProgressionToFlash();
+        }
     }
 }
 
@@ -75,8 +92,8 @@ void ResonatingStrings::handleSet(const char* args) {
 
     handleGet();
 
-    // Persist to flash
-    saveProgressionToFlash();
+    // Persist to flash (debounced)
+    markFlashDirty();
 }
 
 void ResonatingStrings::handleGet() {
@@ -107,7 +124,7 @@ void ResonatingStrings::handleSetArp(const char* args) {
     arpDivision = val;
     arpSettingsChanged = true;
     printf("ARP %d\n", arpDivision);
-    saveProgressionToFlash();
+    markFlashDirty();
 }
 
 void ResonatingStrings::handleGetPat() {
@@ -128,7 +145,7 @@ void ResonatingStrings::handleSetPat(const char* args) {
     arpPattern = val;
     arpSettingsChanged = true;
     printf("PAT %d\n", arpPattern);
-    saveProgressionToFlash();
+    markFlashDirty();
 }
 
 void ResonatingStrings::handleGetOut() {
@@ -179,7 +196,7 @@ void ResonatingStrings::handleSetOut(const char* args) {
     if (count >= 9) ci2Mode = vals[8];
     outputModesChanged = true;
     handleGetOut();
-    saveProgressionToFlash();
+    markFlashDirty();
 }
 
 void ResonatingStrings::handleGetDiv() {
@@ -199,7 +216,7 @@ void ResonatingStrings::handleSetDiv(const char* args) {
     }
     clockDivRatio = val;
     printf("DIV %d\n", (int)clockDivRatio);
-    saveProgressionToFlash();
+    markFlashDirty();
 }
 
 // Save current progression to flash (must be called from Core 1)

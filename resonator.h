@@ -16,6 +16,10 @@
 #define FLASH_PROG_OFFSET (PICO_FLASH_SIZE_BYTES - FLASH_SECTOR_SIZE)
 #define FLASH_PROG_MAGIC 0xAB
 
+// Debounce window for flash saves: a burst of setting changes (e.g. the web UI
+// Save button sends SETARP/SETPAT/SETOUT/SETDIV at once) collapses into one write.
+#define FLASH_DEBOUNCE_MS 300
+
 /**
 Resonator Workshop System Computer Card - by Johan Eklund
 version 1.2 - 2026-05-06
@@ -55,6 +59,8 @@ private:
     ProgressionBuffer progressionBuffers[2];
     volatile bool progressionChanged;
     volatile bool pendingFlashSave;  // Flag for Core 1 to save flash (Core 0 can't lock out Core 1)
+    volatile bool flashDirty;        // settings changed, debounced flash save pending (Core 1)
+    uint32_t flashDirtyTime;         // ms timestamp of last change (Core 1 only)
     int progressionIndex;
 
     bool lastSwitchDown;
@@ -158,6 +164,7 @@ private:
     void handleGetOut();
     void handleSetDiv(const char* args);
     void handleGetDiv();
+    void markFlashDirty();
     void saveProgressionToFlash();
     bool loadProgressionFromFlash();
     void resetToDefaults();

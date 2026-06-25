@@ -83,6 +83,7 @@ ResonatingStrings::ResonatingStrings() : writeIndex1(0), writeIndex2(0), writeIn
                       delayLength1(100), delayLength2(150), delayLength3(200), delayLength4(400),
                       filterState1(0), filterState2(0), filterState3(0), filterState4(0),
                       currentMode(HARMONIC), activeBuffer(0), progressionChanged(false), pendingFlashSave(false),
+                      flashDirty(false), flashDirtyTime(0),
                       progressionIndex(0), lastSwitchDown(true),
                       pulseExciteEnvelope(0), noiseState(12345),
                       dcState1(0), dcState2(0), dcState3(0), dcState4(0),
@@ -463,6 +464,8 @@ void ResonatingStrings::ProcessSample() {
     // Onset detector
     bool onsetTrigOut = false;
     if (needsOnset) {
+        const int32_t ONSET_LOCKOUT = 4800;  // 100ms refractory — one trigger per pluck
+        const int32_t ONSET_PULSE = 240;     // 5ms output pulse
         // Stage 1: Peak-hold envelope — instant attack, slow release
         // Smooths out waveform zero-crossing dips without adding onset latency
         int32_t target = audioAbs << 16;
@@ -476,7 +479,9 @@ void ResonatingStrings::ProcessSample() {
         if (onsetPeakEnv > onsetEnvelope) {
             onsetEnvelope += (onsetPeakEnv - onsetEnvelope) >> 10;  // attack τ ≈ 21ms
         } else {
-            onsetEnvelope -= (onsetEnvelope - onsetPeakEnv) >> 12;  // release τ ≈ 85ms
+            // release τ ≈ 170ms — must be ≥ peak release so the baseline never falls
+            // out from under a decaying note and re-arms a second (false) trigger
+            onsetEnvelope -= (onsetEnvelope - onsetPeakEnv) >> 13;
         }
 
         // Hybrid threshold: 12.5% of baseline or absolute minimum
@@ -486,10 +491,10 @@ void ResonatingStrings::ProcessSample() {
         if (onsetPulseCounter > 0) {
             onsetPulseCounter--;
         } else if (onsetPeakEnv > onsetEnvelope + threshold) {
-            onsetPulseCounter = 2400;         // 50ms lockout
+            onsetPulseCounter = ONSET_LOCKOUT;
             onsetEnvelope = onsetPeakEnv;     // snap baseline to current peak
         }
-        onsetTrigOut = (onsetPulseCounter > 2400 - 240);  // 5ms pulse
+        onsetTrigOut = (onsetPulseCounter > ONSET_LOCKOUT - ONSET_PULSE);
     }
 
     // Chord change pulse
@@ -853,10 +858,12 @@ int main() {
     g_resonator = &resonator;
     resonator.EnableNormalisationProbe();
 
+    // Launch Core 1 first: the launch handshake uses the inter-core FIFO that the
+    // lockout mechanism also relies on, so install the victim handler afterwards.
+    multicore_launch_core1(core1_handler);
+
     // Enable lockout handler so Core 0 can be safely paused during flash operations
     multicore_lockout_victim_init();
-
-    multicore_launch_core1(core1_handler);
     resonator.Run();
     return 0;
 }
