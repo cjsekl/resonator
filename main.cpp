@@ -92,7 +92,7 @@ ResonatingStrings::ResonatingStrings() : writeIndex1(0), writeIndex2(0), writeIn
                       arpRotation(0), envFollower(0), triggerArmed(true),
                       trigPulseCounter(0), prevProgressionIndex(0), chordPulseCounter(0),
                       chordPeriod(0), chordTimer(0), arpStepCounter(0), arpDivision(4), arpPattern(0), arpSettingsChanged(false), arpRandomString(0),
-                      cv1Mode(CVOUT_ARP), cv2Mode(CVOUT_RES_ENV), p1Mode(P1_AUDIO_TRIG), p2Mode(P2_CHORD_TRIG),
+                      cv1Mode(CVOUT_ARP), cv2Mode(CVOUT_IN_ENV), p1Mode(P1_AUDIO_TRIG), p2Mode(P2_CHORD_TRIG),
                       pi1Mode(PI1_PLUCK), pi2Mode(PI2_ADVANCE), ao2Mode(AO2_AUDIO), ci1Mode(CI1_VOCT), ci2Mode(CI2_DAMPING), outputModesChanged(false),
                       clockCounter(0), tapClockPulseCounter(0),
                       randomSHValue(0), arpClockPulseCounter(0),

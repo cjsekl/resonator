@@ -357,7 +357,7 @@ void ResonatingStrings::resetToDefaults() {
     arpDivision = 4;
     arpPattern = 0;
     cv1Mode = CVOUT_ARP;
-    cv2Mode = CVOUT_RES_ENV;
+    cv2Mode = CVOUT_IN_ENV;
     p1Mode = P1_AUDIO_TRIG;
     p2Mode = P2_CHORD_TRIG;
     pi1Mode = PI1_PLUCK;
