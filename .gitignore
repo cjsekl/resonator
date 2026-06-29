@@ -2,3 +2,4 @@ build/*
 !build/resonator.uf2
 CLAUDE.md
 .claude/*
+/resonator.uf2
