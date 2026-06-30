@@ -84,7 +84,7 @@ ResonatingStrings::ResonatingStrings() : writeIndex1(0), writeIndex2(0), writeIn
                       filterState1(0), filterState2(0), filterState3(0), filterState4(0),
                       currentMode(HARMONIC), activeBuffer(0), progressionChanged(false), pendingFlashSave(false),
                       flashDirty(false), flashDirtyTime(0),
-                      progressionIndex(0), lastSwitchDown(true),
+                      progressionIndex(0), lastSwitchDown(true), ledRR(0),
                       pulseExciteEnvelope(0), noiseState(12345),
                       dcState1(0), dcState2(0), dcState3(0), dcState4(0),
                       smoothDelay1(0), smoothDelay2(0), smoothDelay3(0), smoothDelay4(0),
@@ -649,33 +649,30 @@ void ResonatingStrings::ProcessSample() {
     // During long press: progressive fill (0->5) showing reset countdown
     // After reset: brief flash of all LEDs
     // Normal: show position in progression
+    // Compute the 6 LED target states (cheap comparisons), then update only ONE LED per
+    // sample (round-robin) instead of calling LedOn six times every sample. The full set
+    // still refreshes every 6 samples (~125us, far faster than the eye), which keeps the
+    // per-sample cost low so ProcessSample stays well under the 20.8us audio budget.
+    bool ledTargets[6];
     if (switchDown && switchDownCounter > 0 && !resetTriggered) {
         // Progressive LED fill during hold (6 LEDs over 3 seconds)
         int ledsLit = (switchDownCounter * 6) / RESET_HOLD_SAMPLES;
-        LedOn(0, ledsLit >= 1);
-        LedOn(1, ledsLit >= 2);
-        LedOn(2, ledsLit >= 3);
-        LedOn(3, ledsLit >= 4);
-        LedOn(4, ledsLit >= 5);
-        LedOn(5, ledsLit >= 6);
+        for (int i = 0; i < 6; i++) ledTargets[i] = (ledsLit >= i + 1);
     } else if (resetTriggered && switchDownCounter < RESET_HOLD_SAMPLES + 24000) {
         // Flash all LEDs for 0.5 sec after reset
         bool flash = ((switchDownCounter / 4800) % 2) == 0;  // 10Hz blink
-        LedOn(0, flash);
-        LedOn(1, flash);
-        LedOn(2, flash);
-        LedOn(3, flash);
-        LedOn(4, flash);
-        LedOn(5, flash);
+        for (int i = 0; i < 6; i++) ledTargets[i] = flash;
     } else {
         // Normal: show position in progression (0-17)
-        LedOn(0, progressionIndex == 0 || progressionIndex == 6 || progressionIndex == 8 || progressionIndex == 12 || progressionIndex == 16);
-        LedOn(1, progressionIndex == 1 || progressionIndex == 7 || progressionIndex == 9 || progressionIndex == 14);
-        LedOn(2, progressionIndex == 2 || progressionIndex == 8 || progressionIndex == 9 || progressionIndex == 11 || progressionIndex == 15 || progressionIndex == 17);
-        LedOn(3, progressionIndex == 3 || progressionIndex == 7 || progressionIndex == 10 || progressionIndex == 13 || progressionIndex == 15 || progressionIndex == 16);
-        LedOn(4, progressionIndex == 4 || progressionIndex == 10 || progressionIndex == 11 || progressionIndex == 12 || progressionIndex == 14);
-        LedOn(5, progressionIndex == 5 || progressionIndex == 6 || progressionIndex == 13 || progressionIndex == 17);
+        ledTargets[0] = (progressionIndex == 0 || progressionIndex == 6 || progressionIndex == 8 || progressionIndex == 12 || progressionIndex == 16);
+        ledTargets[1] = (progressionIndex == 1 || progressionIndex == 7 || progressionIndex == 9 || progressionIndex == 14);
+        ledTargets[2] = (progressionIndex == 2 || progressionIndex == 8 || progressionIndex == 9 || progressionIndex == 11 || progressionIndex == 15 || progressionIndex == 17);
+        ledTargets[3] = (progressionIndex == 3 || progressionIndex == 7 || progressionIndex == 10 || progressionIndex == 13 || progressionIndex == 15 || progressionIndex == 16);
+        ledTargets[4] = (progressionIndex == 4 || progressionIndex == 10 || progressionIndex == 11 || progressionIndex == 12 || progressionIndex == 14);
+        ledTargets[5] = (progressionIndex == 5 || progressionIndex == 6 || progressionIndex == 13 || progressionIndex == 17);
     }
+    LedOn(ledRR, ledTargets[ledRR]);
+    ledRR = (ledRR + 1) % 6;
 }
 
 // --- Globals and Core 1 ---

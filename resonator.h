@@ -65,6 +65,8 @@ private:
 
     bool lastSwitchDown;
 
+    uint8_t ledRR;  // round-robin LED index: update one LED per sample to bound per-sample cost
+
     int32_t pulseExciteEnvelope;
     uint32_t noiseState;
 
