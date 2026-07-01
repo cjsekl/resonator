@@ -77,7 +77,7 @@ Both outputs share the same modes (defaults: CV Out 1 = arpeggio pitch, CV Out 2
 The tap-tempo clock free-runs at the rate of your last two chord changes, while the chord-change trigger fires once per actual change. Onset detect responds to note attacks in sustained or layered audio (~100 ms minimum spacing).
 
 ### Arpeggio
-When a CV output is set to *arpeggio pitch*, it steps through the current chord's tones, locked to the chord-change tempo. The pattern (up / down / up-down / random) and the number of steps per chord (1, 2, 4, or 8) are set in the editor and shared by both CV outputs.
+When a CV output is set to *arpeggio pitch*, it steps through the current chord's tones, locked to the chord-change tempo. The pattern (up / down / up-down / random) and the number of steps per chord (1, 2, 4, or 8) are set in the editor and shared by both CV outputs. By default it plays one sweep per chord and holds; enable **loop** to keep it cycling continuously on a held chord.
 
 ## Chord Modes
 

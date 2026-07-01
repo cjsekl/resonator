@@ -1098,7 +1098,7 @@
                 <option value="4" selected>4</option>
                 <option value="8">8</option>
             </select>
-        steps</p>
+        steps &nbsp; <label><input type="checkbox" id="arp-loop-1"> loop</label></p>
         <hr>
         <p>CV out 2 &mdash;
             <select id="cv2-mode">
@@ -1126,7 +1126,7 @@
                 <option value="4" selected>4</option>
                 <option value="8">8</option>
             </select>
-        steps</p>
+        steps &nbsp; <label><input type="checkbox" id="arp-loop-2"> loop</label></p>
         <hr>
         <p>Pulse in 1 &mdash;
             <select id="pi1-mode">
@@ -1288,6 +1288,7 @@
                 sendCommand("GET\n");
                 sendCommand("GETARP\n");
                 sendCommand("GETPAT\n");
+                sendCommand("GETLOOP\n");
                 sendCommand("GETOUT\n");
                 sendCommand("GETDIV\n");
             } catch (e) {
@@ -1348,6 +1349,10 @@
                     document.getElementById('arp-pattern-1').value = String(val);
                     document.getElementById('arp-pattern-2').value = String(val);
                 }
+            } else if (line.startsWith("LOOP ")) {
+                const on = parseInt(line.substring(5)) === 1;
+                document.getElementById('arp-loop-1').checked = on;
+                document.getElementById('arp-loop-2').checked = on;
             } else if (line.startsWith("OUT ")) {
                 const vals = line.substring(4).split(",").map(Number);
                 if (vals.length >= 6) {
@@ -1673,12 +1678,16 @@
         const arpDivision1 = document.getElementById('arp-division-1');
         const arpPattern2 = document.getElementById('arp-pattern-2');
         const arpDivision2 = document.getElementById('arp-division-2');
+        const arpLoop1 = document.getElementById('arp-loop-1');
+        const arpLoop2 = document.getElementById('arp-loop-2');
 
         // Keep both arp settings rows in sync
         arpPattern1.addEventListener('change', () => { arpPattern2.value = arpPattern1.value; });
         arpPattern2.addEventListener('change', () => { arpPattern1.value = arpPattern2.value; });
         arpDivision1.addEventListener('change', () => { arpDivision2.value = arpDivision1.value; });
         arpDivision2.addEventListener('change', () => { arpDivision1.value = arpDivision2.value; });
+        arpLoop1.addEventListener('change', () => { arpLoop2.checked = arpLoop1.checked; });
+        arpLoop2.addEventListener('change', () => { arpLoop1.checked = arpLoop2.checked; });
 
         tabChords.addEventListener('click', () => {
             tabChords.classList.add('active');
@@ -1697,6 +1706,7 @@
         outputsSaveBtn.addEventListener('click', () => {
             sendCommand('SETARP ' + arpDivision1.value + '\n');
             sendCommand('SETPAT ' + arpPattern1.value + '\n');
+            sendCommand('SETLOOP ' + (arpLoop1.checked ? '1' : '0') + '\n');
             const cv1 = document.getElementById('cv1-mode').value;
             const cv2 = document.getElementById('cv2-mode').value;
             const p1 = document.getElementById('p1-mode').value;
