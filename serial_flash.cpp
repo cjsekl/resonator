@@ -40,6 +40,10 @@ void ResonatingStrings::handleSerialCommand(const char* cmd) {
         handleSetPat(cmd + 7);
     } else if (strcmp(cmd, "GETPAT") == 0) {
         handleGetPat();
+    } else if (strncmp(cmd, "SETLOOP ", 8) == 0) {
+        handleSetLoop(cmd + 8);
+    } else if (strcmp(cmd, "GETLOOP") == 0) {
+        handleGetLoop();
     } else if (strncmp(cmd, "SETOUT ", 7) == 0) {
         handleSetOut(cmd + 7);
     } else if (strcmp(cmd, "GETOUT") == 0) {
@@ -148,6 +152,26 @@ void ResonatingStrings::handleSetPat(const char* args) {
     markFlashDirty();
 }
 
+void ResonatingStrings::handleGetLoop() {
+    printf("LOOP %d\n", arpLoop ? 1 : 0);
+}
+
+void ResonatingStrings::handleSetLoop(const char* args) {
+    int val = 0;
+    const char* p = args;
+    while (*p >= '0' && *p <= '9') {
+        val = val * 10 + (*p - '0');
+        p++;
+    }
+    if (val < 0 || val > 1) {
+        printf("ERR invalid_arp_loop\n");
+        return;
+    }
+    arpLoop = (val != 0);
+    printf("LOOP %d\n", arpLoop ? 1 : 0);
+    markFlashDirty();
+}
+
 void ResonatingStrings::handleGetOut() {
     printf("OUT %d,%d,%d,%d,%d,%d,%d,%d,%d\n", (int)cv1Mode, (int)cv2Mode, (int)p1Mode, (int)p2Mode, (int)pi1Mode, (int)pi2Mode, (int)ao2Mode, (int)ci1Mode, (int)ci2Mode);
 }
@@ -243,6 +267,7 @@ void ResonatingStrings::saveProgressionToFlash() {
     data[29] = (uint8_t)ao2Mode;
     data[30] = (uint8_t)ci1Mode;
     data[31] = (uint8_t)ci2Mode;
+    data[32] = (uint8_t)(arpLoop ? 1 : 0);
 
     // Pause Core 0 during flash operation (XIP is blocked during erase/program)
     multicore_lockout_start_blocking();
@@ -296,6 +321,9 @@ bool ResonatingStrings::loadProgressionFromFlash() {
     } else {
         arpPattern = 0;
     }
+
+    // Load arp loop (byte 32); old flash zero-fills it, so default is one-shot (off)
+    arpLoop = (flash_data[32] == 1);
 
     // Load output modes (bytes 22-27), default to 0 if invalid (old flash)
     uint8_t cv1Val = flash_data[22];
@@ -356,6 +384,7 @@ void ResonatingStrings::resetToDefaults() {
     currentMode = progressionBuffers[activeBuffer].chords[0];
     arpDivision = 4;
     arpPattern = 0;
+    arpLoop = false;
     cv1Mode = CVOUT_ARP;
     cv2Mode = CVOUT_IN_ENV;
     p1Mode = P1_AUDIO_TRIG;

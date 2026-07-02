@@ -94,6 +94,7 @@ private:
     volatile int arpPattern;   // arpeggio pattern (0=up, 1=down, 2=up-down, 3=random)
     volatile bool arpSettingsChanged; // flag for Core 0 to reset arp state
     int arpRandomString;       // cached random string index, updated on arp step
+    volatile bool arpLoop;     // false = one sweep per chord (hold), true = loop continuously
 
     // Configurable I/O modes
     volatile int cv1Mode;      // CVOutMode enum
@@ -162,6 +163,8 @@ private:
     void handleGetArp();
     void handleSetPat(const char* args);
     void handleGetPat();
+    void handleSetLoop(const char* args);
+    void handleGetLoop();
     void handleSetOut(const char* args);
     void handleGetOut();
     void handleSetDiv(const char* args);
