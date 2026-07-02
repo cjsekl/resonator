@@ -738,7 +738,9 @@ void core1_handler() {
                 // Slow baseline + attack (onset) detection: a fresh pluck rises well above
                 // the recent average; hold the flag ~40ms so a new-note detection can use it.
                 yinSlowAmp += (yinAmplitude - yinSlowAmp) >> 8;  // τ ≈ 21ms at 12kHz
-                if (yinAmplitude > yinSlowAmp + (yinSlowAmp >> 1)) yinAttackHold = 480;
+                // Require a strong (2x) rise to count as an onset, so a sustained note's
+                // amplitude wobble doesn't false-trigger an attack and bypass the octave guard.
+                if (yinAmplitude > (yinSlowAmp << 1)) yinAttackHold = 480;
                 else if (yinAttackHold > 0) yinAttackHold--;
             }
         }
@@ -790,8 +792,8 @@ void core1_handler() {
                             // is almost always a YIN octave error (2nd-harmonic lock or subharmonic
                             // dip), not a real note. Reject both directions; allow a genuine octave
                             // leap only right after an onset transient (a fresh pluck/new note).
-                            bool spuriousOctaveDown = (diff < -940 && diff > -1060 && yinAttackHold == 0);
-                            bool spuriousOctaveUp   = (diff >  940 && diff <  1060 && yinAttackHold == 0);
+                            bool spuriousOctaveDown = (diff < -910 && diff > -1090 && yinAttackHold == 0);
+                            bool spuriousOctaveUp   = (diff >  910 && diff <  1090 && yinAttackHold == 0);
 
                             if (spuriousOctaveDown || spuriousOctaveUp) {
                                 // Reject: hold current pitch
