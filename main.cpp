@@ -688,10 +688,7 @@ void core1_handler() {
     int linePos = 0;
 
     // YIN pitch detector state (all local to Core 1)
-    // YIN_W (analysis window) is 2x YIN_MAX_LAG so at least 2 full periods fit even at the
-    // lowest detectable note (~40Hz), otherwise low notes bias toward the octave up.
-    // Window + max lag (900) stays within yinBuf (1024).
-    const int YIN_W = 600;
+    const int YIN_W = 300;
     const int YIN_MIN_LAG = 8;
     const int YIN_MAX_LAG = 300;
 
