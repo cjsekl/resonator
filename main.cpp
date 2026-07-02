@@ -236,16 +236,16 @@ void ResonatingStrings::ProcessSample() {
         pitchCV = 2048 + (KnobVal(X) / 2);
         stringPitch = pitchCV;
     } else if (ci1Mode == CI1_VOCT) {
-        // CV controls strings + outputs
-        // X knob is fine tune (±1 octave), 1 octave = 341 steps
+        // CV controls strings + outputs. 0V = middle C (pitchCV 3069), matching the
+        // pitch CV outputs. X knob is fine tune (±1 octave), 1 octave = 341 steps.
         int32_t fineTune = ((KnobVal(X) - 2048) * 341) / 2048;
         int32_t scaledCV = CVIn1();
-        pitchCV = 2048 + scaledCV + fineTune;
+        pitchCV = 3069 + scaledCV + fineTune;
         stringPitch = pitchCV;
     } else {
-        // CI1_ARP_ONLY: knob sets string pitch, CV sets output pitch
+        // CI1_ARP_ONLY: knob sets string pitch, CV sets output pitch (0V = middle C)
         stringPitch = 2048 + (KnobVal(X) / 2);
-        pitchCV = 2048 + CVIn1();
+        pitchCV = 3069 + CVIn1();
     }
 
     if (stringPitch > 4095) stringPitch = 4095;

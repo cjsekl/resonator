@@ -113,9 +113,9 @@ inline int32_t periodToMillivolts(int32_t period) {
             hi = mid;
     }
     int32_t pitchCV = oct * 341 + lo;
-    // Reference 2048 (CV In 1 midpoint) so self-patching CV Out -> CV In round-trips correctly.
-    // X knob becomes transpose (+-1 octave) when CV is connected.
-    return (pitchCV - 2048) * 12014 >> 12;
+    // Reference 3069 (middle C = 0V), matching CV In 1 and the root/arp outputs so all
+    // pitch CVs share one anchor and self-patching CV Out -> CV In round-trips correctly.
+    return (pitchCV - 3069) * 12014 >> 12;
 }
 
 // Convert fractional period (fixed-point <<8, in 48kHz samples) to 1V/oct millivolts
@@ -162,6 +162,6 @@ inline int32_t periodToMillivoltsFrac(int32_t period_fp8) {
         pitchCV_fp8 = (oct * 341 + lo) << 8;
     }
 
-    // (pitchCV - 2048) * 12014 / 4096, scaled for fp8 input
-    return (int32_t)(((int64_t)(pitchCV_fp8 - (2048 << 8)) * 12014) >> 20);
+    // (pitchCV - 3069) * 12014 / 4096, scaled for fp8 input (middle C = 0V)
+    return (int32_t)(((int64_t)(pitchCV_fp8 - (3069 << 8)) * 12014) >> 20);
 }

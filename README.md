@@ -64,7 +64,7 @@ Both outputs share the same modes (defaults: CV Out 1 = arpeggio pitch, CV Out 2
 | Pitch S&H | Samples the pitch CV on a Pulse In 1 trigger, holds until the next |
 | Pitch track | YIN pitch detection (Audio In 1) as 1V/oct |
 
-**1V/oct correspondence:** *Pitch track* tracks 1:1 into any 1V/oct input — patch it back into CV In 1 (self-tracking) or into another resonator's CV In 1 and the receiving strings follow the detected pitch at the same octave (its X knob then acts as a ±1-octave transpose). *Arpeggio / root / pitch S&H* are referenced for external oscillators and read about 3 octaves lower than pitch track for the same note, so they don't octave-match a resonator's own pitch input — set the octave on the receiving VCO.
+**1V/oct:** All pitch CVs — pitch track, root, arp, pitch S&H, and CV In 1 — share one anchor, **middle C (C4) = 0 V**, at the standard 1 V/octave. So every pitch output reads the same voltage for a given note, and pitch track patched back into CV In 1 (self-tracking) or into another resonator's CV In 1 tracks at the correct octave (the receiving X knob acts as a ±1-octave transpose). Because CV In 1 is centered on middle C, the full C1–C7 string range spans roughly ±3 V: a bipolar source reaches the whole range, while a unipolar 0 V+ source covers middle C and up.
 
 ### Pulse Inputs
 - **Pulse In 1**: *noise burst / pluck* · *advance chord* · *reset to first chord*.
