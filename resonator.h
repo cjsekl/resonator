@@ -152,6 +152,7 @@ private:
     void updateNeedsFlags();
     int32_t dampingFilter(int32_t input, int32_t& state, int32_t coefficient);
     int arpStringIndex();
+    void stepArpRandom();  // update cached random string index (random / random-walk patterns)
     int32_t processString(int16_t* delayLine, int& writeIndex, int delayLength,
                          int32_t& filterState, int32_t& dcState, int32_t excitation,
                          int32_t dampingCoeff, int32_t frac);

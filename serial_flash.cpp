@@ -142,7 +142,7 @@ void ResonatingStrings::handleSetPat(const char* args) {
         val = val * 10 + (*p - '0');
         p++;
     }
-    if (val < 0 || val > 3) {
+    if (val < 0 || val > 5) {
         printf("ERR invalid_arp_pattern\n");
         return;
     }
@@ -316,7 +316,7 @@ bool ResonatingStrings::loadProgressionFromFlash() {
 
     // Load arp pattern (byte 21), default to 0 if invalid (old flash has 0x00)
     uint8_t patVal = flash_data[21];
-    if (patVal <= 3) {
+    if (patVal <= 5) {
         arpPattern = patVal;
     } else {
         arpPattern = 0;

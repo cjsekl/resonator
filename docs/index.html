@@ -1090,6 +1090,8 @@
                 <option value="1">down</option>
                 <option value="2">up-down</option>
                 <option value="3">random</option>
+                <option value="4">pedal</option>
+                <option value="5">random walk</option>
             </select>
         pattern, chord period divided into
             <select id="arp-division-1">
@@ -1118,6 +1120,8 @@
                 <option value="1">down</option>
                 <option value="2">up-down</option>
                 <option value="3">random</option>
+                <option value="4">pedal</option>
+                <option value="5">random walk</option>
             </select>
         pattern, chord period divided into
             <select id="arp-division-2">
@@ -1345,7 +1349,7 @@
                 }
             } else if (line.startsWith("PAT ")) {
                 const val = parseInt(line.substring(4));
-                if (val >= 0 && val <= 3) {
+                if (val >= 0 && val <= 5) {
                     document.getElementById('arp-pattern-1').value = String(val);
                     document.getElementById('arp-pattern-2').value = String(val);
                 }

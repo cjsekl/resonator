@@ -38,6 +38,24 @@ int ResonatingStrings::arpStringIndex() {
         }
         case 3: // random: cached, updated on arp step
             return arpRandomString;
+        case 4: { // pedal: root alternates with each chord tone (0,1,0,2,0,3,...)
+            static const int pedal[] = {0, 1, 0, 2, 0, 3, 0, 2};
+            return pedal[arpRotation & 7];
+        }
+        case 5: // random walk: cached (steps +-1), updated on arp step
+            return arpRandomString;
+    }
+}
+
+// Update cached random string index: pattern 5 walks +-1 (reflecting at the edges),
+// otherwise it's a fresh random tone. Called on each arp step / chord change.
+void ResonatingStrings::stepArpRandom() {
+    noiseState = noiseState * 1103515245 + 12345;
+    if (arpPattern == 5) {
+        if (noiseState & 0x10000) arpRandomString = (arpRandomString < 3) ? arpRandomString + 1 : 2;
+        else                      arpRandomString = (arpRandomString > 0) ? arpRandomString - 1 : 1;
+    } else {
+        arpRandomString = (noiseState >> 16) & 3;
     }
 }
 
@@ -210,8 +228,7 @@ void ResonatingStrings::ProcessSample() {
             }
             case PI2_ARP_STEP:
                 arpRotation++;
-                noiseState = noiseState * 1103515245 + 12345;
-                arpRandomString = (noiseState >> 16) & 3;
+                stepArpRandom();
                 break;
             case PI2_PLUCK:
                 pulseExciteEnvelope = 2048;
@@ -410,8 +427,7 @@ void ResonatingStrings::ProcessSample() {
             chordTimer = 0;
             prevProgressionIndex = progressionIndex;
             arpRotation = 0;
-            noiseState = noiseState * 1103515245 + 12345;
-            arpRandomString = (noiseState >> 16) & 3;
+            stepArpRandom();
             arpStepCounter = chordPeriod / arpDivision;
             noiseState = noiseState * 1103515245 + 12345;
             randomSHValue = ((int32_t)((noiseState >> 16) & 0xFFF) - 2048) * 12014 >> 12;
@@ -425,8 +441,7 @@ void ResonatingStrings::ProcessSample() {
             if (arpStepCounter == 0 && (arpLoop || arpRotation < (arpDivision - 1))) {
                 arpRotation = (arpRotation + 1) & 7;  // wrap within pattern period
                 arpStepped = true;
-                noiseState = noiseState * 1103515245 + 12345;
-                arpRandomString = (noiseState >> 16) & 3;
+                stepArpRandom();
                 arpStepCounter = chordPeriod / arpDivision;
             }
         }
