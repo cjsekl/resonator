@@ -786,12 +786,14 @@ void core1_handler() {
                             int32_t diff = newMV - pitchMV;
                             int32_t absDiff = diff < 0 ? -diff : diff;
 
-                            // Octave-down guard: a detection ~1 octave below (−1000mV, ±60mV)
-                            // mid-sustain is almost always a YIN octave error, not a real note.
-                            // Allow it only right after an onset transient (a genuine new pluck).
+                            // Octave guard: a detection ~1 octave away (±1000mV, ±60mV) mid-sustain
+                            // is almost always a YIN octave error (2nd-harmonic lock or subharmonic
+                            // dip), not a real note. Reject both directions; allow a genuine octave
+                            // leap only right after an onset transient (a fresh pluck/new note).
                             bool spuriousOctaveDown = (diff < -940 && diff > -1060 && yinAttackHold == 0);
+                            bool spuriousOctaveUp   = (diff >  940 && diff <  1060 && yinAttackHold == 0);
 
-                            if (spuriousOctaveDown) {
+                            if (spuriousOctaveDown || spuriousOctaveUp) {
                                 // Reject: hold current pitch
                             } else if (absDiff > 80 && yinAmplitude > (yinPeakAmp >> 1)) {
                                 // New note: large change + still strong → snap
