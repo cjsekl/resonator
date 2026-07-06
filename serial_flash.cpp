@@ -44,6 +44,10 @@ void ResonatingStrings::handleSerialCommand(const char* cmd) {
         handleSetLoop(cmd + 8);
     } else if (strcmp(cmd, "GETLOOP") == 0) {
         handleGetLoop();
+    } else if (strncmp(cmd, "SETROOT ", 8) == 0) {
+        handleSetRoot(cmd + 8);
+    } else if (strcmp(cmd, "GETROOT") == 0) {
+        handleGetRoot();
     } else if (strncmp(cmd, "SETOUT ", 7) == 0) {
         handleSetOut(cmd + 7);
     } else if (strcmp(cmd, "GETOUT") == 0) {
@@ -172,6 +176,26 @@ void ResonatingStrings::handleSetLoop(const char* args) {
     markFlashDirty();
 }
 
+void ResonatingStrings::handleGetRoot() {
+    printf("ROOT %d\n", rootString);
+}
+
+void ResonatingStrings::handleSetRoot(const char* args) {
+    int val = 0;
+    const char* p = args;
+    while (*p >= '0' && *p <= '9') {
+        val = val * 10 + (*p - '0');
+        p++;
+    }
+    if (val < 0 || val > 3) {
+        printf("ERR invalid_root_string\n");
+        return;
+    }
+    rootString = val;
+    printf("ROOT %d\n", rootString);
+    markFlashDirty();
+}
+
 void ResonatingStrings::handleGetOut() {
     printf("OUT %d,%d,%d,%d,%d,%d,%d,%d,%d\n", (int)cv1Mode, (int)cv2Mode, (int)p1Mode, (int)p2Mode, (int)pi1Mode, (int)pi2Mode, (int)ao2Mode, (int)ci1Mode, (int)ci2Mode);
 }
@@ -268,6 +292,7 @@ void ResonatingStrings::saveProgressionToFlash() {
     data[30] = (uint8_t)ci1Mode;
     data[31] = (uint8_t)ci2Mode;
     data[32] = (uint8_t)(arpLoop ? 1 : 0);
+    data[33] = (uint8_t)rootString;
 
     // Pause Core 0 during flash operation (XIP is blocked during erase/program)
     multicore_lockout_start_blocking();
@@ -324,6 +349,10 @@ bool ResonatingStrings::loadProgressionFromFlash() {
 
     // Load arp loop (byte 32); old flash zero-fills it, so default is one-shot (off)
     arpLoop = (flash_data[32] == 1);
+
+    // Load root-pitch string select (byte 33); old flash zero-fills it -> string 0 (root)
+    uint8_t rootVal = flash_data[33];
+    rootString = (rootVal <= 3) ? rootVal : 0;
 
     // Load output modes (bytes 22-27), default to 0 if invalid (old flash)
     uint8_t cv1Val = flash_data[22];
@@ -385,6 +414,7 @@ void ResonatingStrings::resetToDefaults() {
     arpDivision = 4;
     arpPattern = 0;
     arpLoop = false;
+    rootString = 0;
     cv1Mode = CVOUT_ARP;
     cv2Mode = CVOUT_IN_ENV;
     p1Mode = P1_AUDIO_TRIG;

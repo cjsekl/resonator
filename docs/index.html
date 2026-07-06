@@ -1101,6 +1101,15 @@
                 <option value="8">8</option>
             </select>
         steps &nbsp; <label><input type="checkbox" id="arp-loop-1"> loop</label></p>
+        <p id="root-settings-row-1" style="margin-top:4px">
+            output the pitch of
+            <select id="root-string-1">
+                <option value="0" selected>1st tone (root)</option>
+                <option value="1">2nd tone</option>
+                <option value="2">3rd tone</option>
+                <option value="3">4th tone</option>
+            </select>
+        </p>
         <hr>
         <p>CV out 2 &mdash;
             <select id="cv2-mode">
@@ -1131,6 +1140,15 @@
                 <option value="8">8</option>
             </select>
         steps &nbsp; <label><input type="checkbox" id="arp-loop-2"> loop</label></p>
+        <p id="root-settings-row-2" style="margin-top:4px">
+            output the pitch of
+            <select id="root-string-2">
+                <option value="0" selected>1st tone (root)</option>
+                <option value="1">2nd tone</option>
+                <option value="2">3rd tone</option>
+                <option value="3">4th tone</option>
+            </select>
+        </p>
         <hr>
         <p>Pulse in 1 &mdash;
             <select id="pi1-mode">
@@ -1293,6 +1311,7 @@
                 sendCommand("GETARP\n");
                 sendCommand("GETPAT\n");
                 sendCommand("GETLOOP\n");
+                sendCommand("GETROOT\n");
                 sendCommand("GETOUT\n");
                 sendCommand("GETDIV\n");
             } catch (e) {
@@ -1357,6 +1376,12 @@
                 const on = parseInt(line.substring(5)) === 1;
                 document.getElementById('arp-loop-1').checked = on;
                 document.getElementById('arp-loop-2').checked = on;
+            } else if (line.startsWith("ROOT ")) {
+                const val = parseInt(line.substring(5));
+                if (val >= 0 && val <= 3) {
+                    document.getElementById('root-string-1').value = String(val);
+                    document.getElementById('root-string-2').value = String(val);
+                }
             } else if (line.startsWith("OUT ")) {
                 const vals = line.substring(4).split(",").map(Number);
                 if (vals.length >= 6) {
@@ -1684,6 +1709,8 @@
         const arpDivision2 = document.getElementById('arp-division-2');
         const arpLoop1 = document.getElementById('arp-loop-1');
         const arpLoop2 = document.getElementById('arp-loop-2');
+        const rootString1 = document.getElementById('root-string-1');
+        const rootString2 = document.getElementById('root-string-2');
 
         // Keep both arp settings rows in sync
         arpPattern1.addEventListener('change', () => { arpPattern2.value = arpPattern1.value; });
@@ -1692,6 +1719,8 @@
         arpDivision2.addEventListener('change', () => { arpDivision1.value = arpDivision2.value; });
         arpLoop1.addEventListener('change', () => { arpLoop2.checked = arpLoop1.checked; });
         arpLoop2.addEventListener('change', () => { arpLoop1.checked = arpLoop2.checked; });
+        rootString1.addEventListener('change', () => { rootString2.value = rootString1.value; });
+        rootString2.addEventListener('change', () => { rootString1.value = rootString2.value; });
 
         tabChords.addEventListener('click', () => {
             tabChords.classList.add('active');
@@ -1711,6 +1740,7 @@
             sendCommand('SETARP ' + arpDivision1.value + '\n');
             sendCommand('SETPAT ' + arpPattern1.value + '\n');
             sendCommand('SETLOOP ' + (arpLoop1.checked ? '1' : '0') + '\n');
+            sendCommand('SETROOT ' + rootString1.value + '\n');
             const cv1 = document.getElementById('cv1-mode').value;
             const cv2 = document.getElementById('cv2-mode').value;
             const p1 = document.getElementById('p1-mode').value;
@@ -1799,6 +1829,9 @@
             // Show arp settings under each CV output that has arpeggio selected
             document.getElementById('arp-settings-row-1').style.display = (cv1 === '0') ? '' : 'none';
             document.getElementById('arp-settings-row-2').style.display = (cv2 === '0') ? '' : 'none';
+            // Show root-string selector under each CV output set to root pitch
+            document.getElementById('root-settings-row-1').style.display = (cv1 === '1') ? '' : 'none';
+            document.getElementById('root-settings-row-2').style.display = (cv2 === '1') ? '' : 'none';
             // Show clock divider ratio when P2 is set to clock divider
             document.getElementById('clk-div-row').style.display = (p2 === '4') ? '' : 'none';
 

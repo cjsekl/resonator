@@ -95,6 +95,7 @@ private:
     volatile bool arpSettingsChanged; // flag for Core 0 to reset arp state
     int arpRandomString;       // cached random string index, updated on arp step
     volatile bool arpLoop;     // false = one sweep per chord (hold), true = loop continuously
+    volatile int rootString;   // which chord tone (0-3) the root-pitch CV output uses
 
     // Configurable I/O modes
     volatile int cv1Mode;      // CVOutMode enum
@@ -166,6 +167,8 @@ private:
     void handleGetPat();
     void handleSetLoop(const char* args);
     void handleGetLoop();
+    void handleSetRoot(const char* args);
+    void handleGetRoot();
     void handleSetOut(const char* args);
     void handleGetOut();
     void handleSetDiv(const char* args);

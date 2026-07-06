@@ -57,7 +57,7 @@ Both outputs share the same modes (defaults: CV Out 1 = arpeggio pitch, CV Out 2
 | Mode | Output |
 |------|--------|
 | Arpeggio pitch | Rotating chord tones as 1V/oct (see [Arpeggio](#arpeggio)) |
-| Root pitch | Fundamental as 1V/oct |
+| Root pitch | A selectable chord tone's pitch as 1V/oct (root by default; pick 1st–4th tone in the editor) |
 | Resonator envelope | Resonator output amplitude as CV |
 | Input envelope | Input amplitude as CV |
 | Random S&H | New random voltage on each chord change |

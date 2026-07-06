@@ -109,7 +109,7 @@ ResonatingStrings::ResonatingStrings() : writeIndex1(0), writeIndex2(0), writeIn
                       switchDownCounter(0), resetTriggered(false),
                       arpRotation(0), envFollower(0), triggerArmed(true),
                       trigPulseCounter(0), prevProgressionIndex(0), chordPulseCounter(0),
-                      chordPeriod(0), chordTimer(0), arpStepCounter(0), arpDivision(4), arpPattern(0), arpSettingsChanged(false), arpRandomString(0), arpLoop(false),
+                      chordPeriod(0), chordTimer(0), arpStepCounter(0), arpDivision(4), arpPattern(0), arpSettingsChanged(false), arpRandomString(0), arpLoop(false), rootString(0),
                       cv1Mode(CVOUT_ARP), cv2Mode(CVOUT_IN_ENV), p1Mode(P1_AUDIO_TRIG), p2Mode(P2_CHORD_TRIG),
                       pi1Mode(PI1_PLUCK), pi2Mode(PI2_ADVANCE), ao2Mode(AO2_AUDIO), ci1Mode(CI1_VOCT), ci2Mode(CI2_DAMPING), outputModesChanged(false),
                       clockCounter(0), tapClockPulseCounter(0),
@@ -545,9 +545,18 @@ void ResonatingStrings::ProcessSample() {
     }
 
     // Arp / root pitch (millivolts)
-    int32_t rootMV = 0, arpMV = 0;
+    int32_t rootMV = 0, rootPitchMV = 0, arpMV = 0;
     if (needsRootMV) {
         rootMV = (pitchCV - 3069) * 12014 >> 12;
+        // Root-pitch output can be any chord tone (string 0-3), selected by rootString.
+        int rootRatio;
+        switch (rootString) {
+            case 1: rootRatio = ratioToMillivolts(num2, den2); break;
+            case 2: rootRatio = ratioToMillivolts(num3, den3); break;
+            case 3: rootRatio = ratioToMillivolts(num4, den4); break;
+            default: rootRatio = 0; break;  // string 0 = root (1:1)
+        }
+        rootPitchMV = rootMV + rootRatio;
     }
     if (needsArpMV) {
         int ratioMV;
@@ -605,7 +614,7 @@ void ResonatingStrings::ProcessSample() {
     switch (cv1Mode) {
         default:
         case CVOUT_ARP:        CVOut1Millivolts(arpMV); break;
-        case CVOUT_ROOT:       CVOut1Millivolts(rootMV); break;
+        case CVOUT_ROOT:       CVOut1Millivolts(rootPitchMV); break;
         case CVOUT_RES_ENV:    CVOut1((int16_t)(envFollower >> 16)); break;
         case CVOUT_IN_ENV:     CVOut1((int16_t)(inputEnvFollower >> 16)); break;
         case CVOUT_RANDOM_SH:  CVOut1Millivolts(randomSHValue); break;
@@ -617,7 +626,7 @@ void ResonatingStrings::ProcessSample() {
     switch (cv2Mode) {
         default:
         case CVOUT_ARP:        CVOut2Millivolts(arpMV); break;
-        case CVOUT_ROOT:       CVOut2Millivolts(rootMV); break;
+        case CVOUT_ROOT:       CVOut2Millivolts(rootPitchMV); break;
         case CVOUT_RES_ENV:    CVOut2((int16_t)(envFollower >> 16)); break;
         case CVOUT_IN_ENV:     CVOut2((int16_t)(inputEnvFollower >> 16)); break;
         case CVOUT_RANDOM_SH:  CVOut2Millivolts(randomSHValue); break;
