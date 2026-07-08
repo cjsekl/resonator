@@ -1,7 +1,8 @@
 # Resonator
 
-A sympathetic resonator workshop card inspired by the Mutable Instruments Rings module and the tanpura.
+A sympathetic resonator workshop card originally inspired by the Mutable Instruments Rings module and the tanpura.
 It has four resonating Karplus-Strong strings that, when excited, create rich, harmonic textures.
+It also has a range of options for pulse/CV I/O, including arpeggios, pitch detection and envelope followers.
 
 ## Description
 

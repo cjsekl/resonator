@@ -1,3 +1,9 @@
+# v1.2
+
+2026-07-08
+
+This versions adds multiple outputs to pulse and CV out, including arpeggio, pitch detector, envelope follower & audio/onset detectors.
+
 # v1.1
 
 2026-02-04
