@@ -91,7 +91,7 @@ private:
     uint32_t chordTimer;       // sample counter since last chord change
     uint32_t arpStepCounter;   // counts down to next arpeggio step
     volatile int arpDivision;  // arpeggio subdivision (1, 2, 4, or 8)
-    volatile int arpPattern;   // arpeggio pattern (0=up, 1=down, 2=up-down, 3=random)
+    volatile int arpPattern;   // arpeggio pattern (0=up, 1=down, 2=up-down, 3=random, 4=pedal, 5=random walk)
     volatile bool arpSettingsChanged; // flag for Core 0 to reset arp state
     int arpRandomString;       // cached random string index, updated on arp step
     volatile bool arpLoop;     // false = one sweep per chord (hold), true = loop continuously

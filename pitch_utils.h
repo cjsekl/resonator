@@ -92,34 +92,8 @@ inline int32_t ratioToMillivolts(int num, int den) {
     }
 }
 
-// Convert measured period (in samples) to 1V/oct millivolts
-// Reverse lookup into delay_vals table
-inline int32_t periodToMillivolts(int32_t period) {
-    if (period < 24) period = 24;      // clamp ~2kHz max
-    if (period > 1500) period = 1500;  // clamp ~32Hz min
-    // Find octave: largest oct where delay_vals[0] >> oct >= period
-    // delay_vals are <<6 scaled, ExpDelay returns delay_vals[sub] >> oct = samples
-    int oct = 0;
-    while (oct < 11 && (int32_t)(delay_vals[0] >> (oct + 1)) >= period) oct++;
-    // Binary search within delay_vals (monotonically decreasing)
-    // Compare delay_vals[mid] against period << oct for full precision
-    int32_t scaledPeriod = (int32_t)period << oct;
-    int lo = 0, hi = 340;
-    while (lo < hi) {
-        int mid = (lo + hi) >> 1;
-        if ((int32_t)delay_vals[mid] > scaledPeriod)
-            lo = mid + 1;
-        else
-            hi = mid;
-    }
-    int32_t pitchCV = oct * 341 + lo;
-    // Reference 3069 (middle C = 0V), matching CV In 1 and the root/arp outputs so all
-    // pitch CVs share one anchor and self-patching CV Out -> CV In round-trips correctly.
-    return (pitchCV - 3069) * 12014 >> 12;
-}
-
 // Convert fractional period (fixed-point <<8, in 48kHz samples) to 1V/oct millivolts
-// Same as periodToMillivolts but with sub-sample precision via table interpolation
+// Reverse lookup into delay_vals table with sub-sample precision via table interpolation
 inline int32_t periodToMillivoltsFrac(int32_t period_fp8) {
     // Clamp using integer part
     int32_t period = period_fp8 >> 8;
