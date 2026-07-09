@@ -2,7 +2,16 @@
 
 2026-07-08
 
-This versions adds multiple outputs to pulse and CV out, including arpeggio, pitch detector, envelope follower & audio/onset detectors.
+Adds multiple configurable outputs to pulse and CV out — arpeggio (with loop toggle, pedal & random-walk patterns and a selectable root tone), pitch detector, envelope followers and audio/onset detectors. All pitch CVs share a middle-C (0V) reference. Includes stability fixes for pitch-tracking audio glitches, settings-save lockups and octave jumps.
+
+# v1.1.1
+
+2026-02-18
+
+Bugfixes:
+
+* Fix crash when resetting chord progression through long hold of Z switch
+* Reduce output level of tuning mode to match normal mode
 
 # v1.1
 

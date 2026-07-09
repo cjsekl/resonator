@@ -267,6 +267,14 @@ void ResonatingStrings::handleSetDiv(const char* args) {
     markFlashDirty();
 }
 
+// Flash erase+program callback for flash_safe_execute. Runs in RAM with the other core
+// locked out and interrupts disabled (guaranteed by flash_safe_execute). param = data page.
+static void __not_in_flash_func(doFlashProgram)(void* param) {
+    const uint8_t* data = (const uint8_t*)param;
+    flash_range_erase(FLASH_PROG_OFFSET, FLASH_SECTOR_SIZE);
+    flash_range_program(FLASH_PROG_OFFSET, data, FLASH_PAGE_SIZE);
+}
+
 // Save current progression to flash (must be called from Core 1)
 void ResonatingStrings::saveProgressionToFlash() {
     int bufIdx = activeBuffer;
@@ -294,13 +302,16 @@ void ResonatingStrings::saveProgressionToFlash() {
     data[32] = (uint8_t)(arpLoop ? 1 : 0);
     data[33] = (uint8_t)rootString;
 
-    // Pause Core 0 during flash operation (XIP is blocked during erase/program)
-    multicore_lockout_start_blocking();
-    uint32_t ints = save_and_disable_interrupts();
-    flash_range_erase(FLASH_PROG_OFFSET, FLASH_SECTOR_SIZE);
-    flash_range_program(FLASH_PROG_OFFSET, data, FLASH_PAGE_SIZE);
-    restore_interrupts(ints);
-    multicore_lockout_end_blocking();
+    // Write flash safely. flash_safe_execute locks out Core 0 and disables interrupts,
+    // then runs doFlashProgram in that safe window. The timeout is for *engaging* the
+    // lockout handshake (a healthy one completes in microseconds); keep it short so a
+    // struggling handshake under heavy Core 1 load (pitch tracking) blips briefly instead
+    // of freezing both cores for a full second. Retry a bounded number of times to catch
+    // a good window; never re-arm (avoids a retry storm that would stall Core 1's YIN).
+    for (int attempt = 0; attempt < 8; attempt++) {
+        if (flash_safe_execute(doFlashProgram, data, 20) == PICO_OK) break;
+        sleep_ms(10);
+    }
 }
 
 // Load progression from flash, returns true if valid data found

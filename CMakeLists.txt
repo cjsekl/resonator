@@ -35,6 +35,7 @@ target_link_libraries(resonator
     hardware_irq
     hardware_clocks
     pico_multicore
+    pico_flash
     pico_unique_id
 )
 

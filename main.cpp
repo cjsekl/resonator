@@ -885,11 +885,19 @@ int main() {
     resonator.EnableNormalisationProbe();
 
     // Launch Core 1 first: the launch handshake uses the inter-core FIFO that the
-    // lockout mechanism also relies on, so install the victim handler afterwards.
+    // lockout mechanism also relies on, so set up the flash-safe handler afterwards.
     multicore_launch_core1(core1_handler);
 
-    // Enable lockout handler so Core 0 can be safely paused during flash operations
-    multicore_lockout_victim_init();
+    // Register Core 0 as a flash_safe_execute victim so Core 1 can safely lock it out
+    // during flash writes (see saveProgressionToFlash). This replaces the hand-rolled
+    // multicore_lockout, which could deadlock under heavy Core 1 load (pitch tracking).
+    flash_safe_execute_core_init();
+
+    // Raise the flash-lockout FIFO IRQ above the audio DMA IRQ (0x80) so Core 0 answers a
+    // lockout request immediately, before/preempting the audio ISR. Otherwise, under heavy
+    // dual-core load the handshake times out and leaves stale entries in the 8-deep inter-core
+    // FIFO; after ~8-10 saves the FIFO fills and the lockout breaks permanently (crash on save).
+    irq_set_priority(SIO_IRQ_PROC0, 0x40);
     resonator.Run();
     return 0;
 }
