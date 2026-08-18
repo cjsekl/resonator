@@ -1427,6 +1427,12 @@
         function expectSave() {
             showToast("Saving", null, 0);
             clearTimeout(savePendingTimer);
+            // 2.5s covers the slowest real case comfortably: the outputs Save sends six
+            // commands (500ms at the 100ms spacing), then the firmware debounces 300ms and
+            // takes ~51ms to erase, program and verify - about 850ms, or ~1.2s if the
+            // sector erase hits its 400ms worst case. Kept tight because on older firmware,
+            // which never confirms, this timeout is exactly how long the user stares at
+            // "Saving" before getting an answer.
             savePendingTimer = setTimeout(() => {
                 if (deviceConfirmsSaves) {
                     // This device has confirmed before, so silence now is a real failure.
@@ -1436,7 +1442,7 @@
                     // prove it. Say what we actually know rather than crying wolf.
                     showToast("Sent to device", "ok", 2500);
                 }
-            }, 5000);
+            }, 2500);
         }
 
         function handleResponse(line) {
