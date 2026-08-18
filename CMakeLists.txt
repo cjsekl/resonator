@@ -48,6 +48,10 @@ target_link_libraries(resonator
 target_compile_definitions(resonator PRIVATE
     CFG_TUD_CDC_TX_BUFSIZE=256
     CFG_TUD_CDC_RX_BUFSIZE=256
+    # Disable the SDK's background task. It calls tud_task() from Core 0's alarm, which
+    # would race the USB device driver now that USBCTRL_IRQ has been moved to Core 1.
+    # Core 1 pumps tud_task() itself instead (see core1_handler).
+    PICO_STDIO_USB_ENABLE_IRQ_BACKGROUND_TASK=0
 )
 
 # Run from RAM to prevent flash access delays during audio

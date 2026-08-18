@@ -1,4 +1,5 @@
 #include "resonator.h"
+#include "tusb.h"   // Core 1 drives tud_task() itself; see core1_handler
 
 // --- Hot-path methods (same TU as ProcessSample for inlining) ---
 
@@ -706,7 +707,27 @@ void ResonatingStrings::ProcessSample() {
 static ResonatingStrings* g_resonator = nullptr;
 
 void core1_handler() {
-    sleep_ms(500);  // Wait for USB to settle
+    // Take ownership of the USB interrupt.
+    //
+    // stdio_init_all() has to run on Core 0 (stdio_usb_init asserts the caller owns the
+    // default alarm pool), and tusb_init() enables USBCTRL_IRQ on the calling core. But
+    // the NVIC is per-core, so the interrupt can be moved: Core 0 masks it, Core 1 enables
+    // it here. That puts TinyUSB's device driver on the same core as every printf and
+    // getchar. Previously the driver ran on Core 0 while stdio_usb_out_chars/in_chars
+    // called tud_task() from Core 1 on every read and write - TinyUSB cannot be driven
+    // from two cores, and losing that race corrupted the CDC endpoint permanently,
+    // silencing the module until it was replugged.
+    //
+    // The SDK's own background task is disabled (PICO_STDIO_USB_ENABLE_IRQ_BACKGROUND_TASK
+    // in CMakeLists) because it would call tud_task() from Core 0's alarm and reintroduce
+    // exactly that race. Nothing else pumps TinyUSB now, so this loop must - and it must
+    // start before enumeration, since stdio_usb_in_chars only calls tud_task() once CDC is
+    // already up.
+    irq_set_enabled(USBCTRL_IRQ, true);
+
+    // Let USB enumerate. Pumping rather than sleeping, for the reason above.
+    absolute_time_t settle = make_timeout_time_ms(500);
+    while (!time_reached(settle)) tud_task();
 
     // Serial state
     char lineBuf[128];
@@ -876,6 +897,9 @@ void core1_handler() {
             }
         }
 
+        // Keep TinyUSB running. This is the only thing pumping it now.
+        tud_task();
+
         // Non-blocking serial check
         int c = getchar_timeout_us(0);
         if (c == PICO_ERROR_TIMEOUT) {
@@ -900,9 +924,16 @@ int main() {
     g_resonator = &resonator;
     resonator.EnableNormalisationProbe();
 
-    // Core 1 runs pitch detection and the serial/flash handling. Core 0 is never locked
-    // out during flash writes (the binary runs from RAM, so it has no reason to be), so
-    // no lockout victim handler or FIFO IRQ priority juggling is needed here.
+    // Hand the USB interrupt to Core 1, which re-enables it on its own NVIC. Everything
+    // that touches TinyUSB - the device driver and every tud_task() call - then lives on
+    // one core. Core 0 cannot host it: ProcessSample runs in the priority-0 audio ISR at
+    // 48kHz and leaves too little time for the idle loop to pump tud_task(), which starves
+    // CDC outright (tried, and it wedged harder than the bug it was meant to fix).
+    irq_set_enabled(USBCTRL_IRQ, false);
+
+    // Core 1 runs pitch detection, USB, and the serial/flash handling. Core 0 is never
+    // locked out during flash writes (the binary runs from RAM, so it has no reason to
+    // be), so no lockout victim handler or FIFO IRQ priority juggling is needed here.
     multicore_launch_core1(core1_handler);
 
     resonator.Run();

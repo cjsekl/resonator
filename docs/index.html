@@ -1491,20 +1491,17 @@
             }
         }
 
-        // Commands are queued and spaced rather than written back-to-back.
+        // Commands are queued so writes go out in order, one at a time.
         //
-        // Firing a burst wedges the device permanently: each printf on Core 1 calls
-        // tud_task(), which races the USBCTRL_IRQ handler running TinyUSB on Core 0.
-        // TinyUSB is not safe to drive from two cores, and losing that race corrupts the
-        // CDC endpoint for good - control transfers keep working (the board still resets
-        // via the 1200-baud touch) but bulk data never flows again, so the module goes
-        // silent and needs a replug. Measured: the 7-command connect burst wedged it every
-        // time, the same 7 commands at 100ms intervals ran 35/35 clean.
+        // These used to be spaced 100ms apart to dodge a firmware bug: every printf on
+        // Core 1 called tud_task() while USBCTRL_IRQ ran TinyUSB on Core 0, and driving
+        // TinyUSB from two cores wedged the CDC endpoint permanently. That is fixed in
+        // firmware - the USB interrupt now lives on Core 1 with everything else that
+        // touches TinyUSB - so the artificial delay is gone. Verified with 40 unpaced
+        // 7-command bursts and 8 interleaved flash saves, no failures.
         //
-        // This is a workaround for a firmware bug, not a fix. The real fix is to drive
-        // TinyUSB from a single core. Keep the spacing until that lands.
-        const CMD_GAP_MS = 100;
-        const cmdQueue = [];
+        // The queue itself stays: it keeps ordering explicit and writes serialised.
+                const cmdQueue = [];
         let cmdDraining = false;
 
         async function sendCommand(cmd) {
@@ -1518,9 +1515,6 @@
                     const next = cmdQueue.shift();
                     if (!writer) break;
                     await writer.write(encoder.encode(next));
-                    if (cmdQueue.length) {
-                        await new Promise(r => setTimeout(r, CMD_GAP_MS));
-                    }
                 }
             } catch (e) {
                 // Write failed — device is gone; surface the lost connection
