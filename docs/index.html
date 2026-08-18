@@ -52,6 +52,30 @@
             color: #666;
         }
         #status.connected { color: #aaa; }
+
+        /* Save confirmation. Deliberately no border, background or padding: in this UI a
+           bordered box is the button idiom (#connectBtn et al), and this is not clickable.
+           It follows #status instead - bare letter-spaced text. The shadow is only there to
+           keep it legible over the animated background. */
+        #saveToast {
+            position: fixed;
+            left: 50%;
+            bottom: 26px;
+            transform: translateX(-50%);
+            font-size: 11px;
+            letter-spacing: 1.5px;
+            text-transform: uppercase;
+            color: #666;
+            pointer-events: none;
+            user-select: none;
+            opacity: 0;
+            transition: opacity 0.3s ease;
+            z-index: 100;
+            text-shadow: 0 0 10px #000, 0 0 4px #000, 0 0 2px #000;
+        }
+        #saveToast.visible { opacity: 1; }
+        #saveToast.ok { color: #aaa; }
+        #saveToast.fail { color: #d09090; }
         #connectBtn, #settings-btn, #info-btn {
             padding: 8px 14px;
             border: 1px solid #333;
@@ -454,6 +478,12 @@
         body.light-mode #status.connected {
             color: #444;
         }
+        body.light-mode #saveToast {
+            color: #888;
+            text-shadow: 0 0 10px #fafafa, 0 0 4px #fafafa, 0 0 2px #fafafa;
+        }
+        body.light-mode #saveToast.ok { color: #444; }
+        body.light-mode #saveToast.fail { color: #a03030; }
         body.light-mode #connectBtn {
             border-color: #ccc;
             color: #666;
@@ -1216,6 +1246,7 @@
     </div>
 
 
+    <div id="saveToast" role="status" aria-live="polite"></div>
     <script>
         const CHORDS = [
             // Fundamentals
@@ -1297,6 +1328,19 @@
                 port = await navigator.serial.requestPort();
                 await port.open({ baudRate: 115200 });
 
+                // Assert DTR explicitly. The firmware's USB stack treats DTR as "host is
+                // there": TinyUSB's tud_cdc_connected() is `tud_ready() && line_state bit 0`,
+                // and the Pico SDK gates BOTH stdio_usb_out_chars and stdio_usb_in_chars on
+                // it. Without DTR the device goes completely silent in both directions while
+                // the port still opens cleanly. macOS asserts DTR when the tty is opened, so
+                // it works there by luck; Linux leaves it to the browser. Don't rely on the
+                // platform default.
+                try {
+                    await port.setSignals({ dataTerminalReady: true, requestToSend: true });
+                } catch (e) {
+                    console.warn("setSignals unsupported; device may stay silent", e);
+                }
+
                 writer = port.writable.getWriter();
                 const textDecoder = new TextDecoderStream();
                 // pipeTo rejects when the port closes/drops — swallow to avoid an
@@ -1356,6 +1400,33 @@
             }
         }
 
+        // --- Save confirmation ---
+        // The device replies SAVED once it has written the settings sector and read it
+        // back to verify. The write is debounced 300ms after the last command, so expect
+        // the reply ~300-400ms after a click.
+        const saveToast = document.getElementById("saveToast");
+        let saveToastTimer = null;
+        let savePendingTimer = null;
+
+        function showToast(text, cls, holdMs) {
+            clearTimeout(saveToastTimer);
+            saveToast.textContent = text;
+            saveToast.className = "visible" + (cls ? " " + cls : "");
+            if (holdMs) {
+                saveToastTimer = setTimeout(() => { saveToast.className = ""; }, holdMs);
+            }
+        }
+
+        // Call when a save-triggering command has been sent. Leaves "Saving" up with no
+        // timeout, so a device that never confirms shows a failure rather than a success.
+        function expectSave() {
+            showToast("Saving", null, 0);
+            clearTimeout(savePendingTimer);
+            savePendingTimer = setTimeout(() => {
+                showToast("No confirmation from device", "fail", 4000);
+            }, 5000);
+        }
+
         function handleResponse(line) {
             if (line.startsWith("PROG ")) {
                 const ids = line.substring(5).split(",").map(Number);
@@ -1407,19 +1478,56 @@
                 if (val === 2 || val === 3 || val === 4 || val === 8) {
                     document.getElementById('clk-div-ratio').value = String(val);
                 }
+            } else if (line === "SAVED") {
+                clearTimeout(savePendingTimer);
+                showToast("Saved to device", "ok", 2500);
             } else if (line.startsWith("ERR ")) {
-                console.error("Device error:", line.substring(4));
+                const err = line.substring(4);
+                console.error("Device error:", err);
+                if (err === "save_verify") {
+                    clearTimeout(savePendingTimer);
+                    showToast("Save failed \u2014 flash did not verify", "fail", 6000);
+                }
             }
         }
 
+        // Commands are queued and spaced rather than written back-to-back.
+        //
+        // Firing a burst wedges the device permanently: each printf on Core 1 calls
+        // tud_task(), which races the USBCTRL_IRQ handler running TinyUSB on Core 0.
+        // TinyUSB is not safe to drive from two cores, and losing that race corrupts the
+        // CDC endpoint for good - control transfers keep working (the board still resets
+        // via the 1200-baud touch) but bulk data never flows again, so the module goes
+        // silent and needs a replug. Measured: the 7-command connect burst wedged it every
+        // time, the same 7 commands at 100ms intervals ran 35/35 clean.
+        //
+        // This is a workaround for a firmware bug, not a fix. The real fix is to drive
+        // TinyUSB from a single core. Keep the spacing until that lands.
+        const CMD_GAP_MS = 100;
+        const cmdQueue = [];
+        let cmdDraining = false;
+
         async function sendCommand(cmd) {
             if (!writer) return;
+            cmdQueue.push(cmd);
+            if (cmdDraining) return;
+            cmdDraining = true;
             const encoder = new TextEncoder();
             try {
-                await writer.write(encoder.encode(cmd));
+                while (cmdQueue.length) {
+                    const next = cmdQueue.shift();
+                    if (!writer) break;
+                    await writer.write(encoder.encode(next));
+                    if (cmdQueue.length) {
+                        await new Promise(r => setTimeout(r, CMD_GAP_MS));
+                    }
+                }
             } catch (e) {
                 // Write failed — device is gone; surface the lost connection
+                cmdQueue.length = 0;
                 handleDisconnect();
+            } finally {
+                cmdDraining = false;
             }
         }
 
@@ -1427,6 +1535,7 @@
             const ids = getProgressionIds();
             if (ids.length === 0) return;
             sendCommand("SET " + ids.join(",") + "\n");
+            expectSave();
 
             // Trigger resonance wave when sending to device
             if (window.triggerResonance) {
@@ -1752,6 +1861,7 @@
             const ci2 = document.getElementById('ci2-mode').value;
             sendCommand('SETOUT ' + [cv1,cv2,p1,p2,pi1,pi2,ao2,ci1,ci2].join(',') + '\n');
             sendCommand('SETDIV ' + document.getElementById('clk-div-ratio').value + '\n');
+            expectSave();
         });
 
         // Description text for each mode

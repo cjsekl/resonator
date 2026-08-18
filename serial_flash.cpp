@@ -314,6 +314,21 @@ void ResonatingStrings::saveProgressionToFlash() {
     // there is nothing to retry. This blocks Core 1 for the sector erase (~45ms typical,
     // up to 400ms worst case); the YIN ring is sized to absorb that (see pitch_utils.h).
     writeFlashPage(data);
+
+    // Read the page back through XIP and confirm it. flash_range_program flushes the XIP
+    // cache, so this sees real flash rather than a stale cache line. Reading flash from
+    // Core 1 at runtime is fine — the copy_to_ram invariant only forbids it on Core 0,
+    // and no write can be in flight here since writeFlashPage has returned.
+    //
+    // The save used to be audible (it glitched the audio), which was the only feedback
+    // that it had happened. Now that it is seamless, this is what the web UI shows a
+    // confirmation from.
+    const uint8_t* written = (const uint8_t*)(XIP_BASE + FLASH_PROG_OFFSET);
+    if (memcmp(written, data, FLASH_PAGE_SIZE) == 0) {
+        printf("SAVED\n");
+    } else {
+        printf("ERR save_verify\n");
+    }
 }
 
 // Load progression from flash, returns true if valid data found
