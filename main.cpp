@@ -736,6 +736,21 @@ void core1_handler() {
     while (true) {
         // Process all pending audio samples from Core 0
         uint32_t head = yinRingHead;
+
+        // If Core 0 lapped the ring while this core was busy (a flash save blocks here
+        // for a whole sector erase), the unread entries have already been overwritten.
+        // Replaying them would feed YIN a perfectly periodic YIN_RING_SIZE artifact,
+        // which it locks onto as a bogus pitch. Drop the backlog and rescan fresh audio.
+        if ((uint32_t)(head - ringTail) > YIN_RING_SIZE) {
+            ringTail = head;
+            scanLag = 0;
+            runningSum = 0;
+            prevNorm = 0;
+            prevPrevNorm = 0;
+            foundDip = false;
+            scanWaitUntil = decSampleCount + YIN_W;  // wait for a full fresh window
+        }
+
         while (ringTail != head) {
             int16_t sample = yinRing[ringTail & (YIN_RING_SIZE - 1)];
             ringTail++;
@@ -877,6 +892,7 @@ void core1_handler() {
     }
 }
 
+
 int main() {
     stdio_init_all();  // Initialize USB CDC
 
@@ -884,20 +900,11 @@ int main() {
     g_resonator = &resonator;
     resonator.EnableNormalisationProbe();
 
-    // Launch Core 1 first: the launch handshake uses the inter-core FIFO that the
-    // lockout mechanism also relies on, so set up the flash-safe handler afterwards.
+    // Core 1 runs pitch detection and the serial/flash handling. Core 0 is never locked
+    // out during flash writes (the binary runs from RAM, so it has no reason to be), so
+    // no lockout victim handler or FIFO IRQ priority juggling is needed here.
     multicore_launch_core1(core1_handler);
 
-    // Register Core 0 as a flash_safe_execute victim so Core 1 can safely lock it out
-    // during flash writes (see saveProgressionToFlash). This replaces the hand-rolled
-    // multicore_lockout, which could deadlock under heavy Core 1 load (pitch tracking).
-    flash_safe_execute_core_init();
-
-    // Raise the flash-lockout FIFO IRQ above the audio DMA IRQ (0x80) so Core 0 answers a
-    // lockout request immediately, before/preempting the audio ISR. Otherwise, under heavy
-    // dual-core load the handshake times out and leaves stale entries in the 8-deep inter-core
-    // FIFO; after ~8-10 saves the FIFO fills and the lockout breaks permanently (crash on save).
-    irq_set_priority(SIO_IRQ_PROC0, 0x40);
     resonator.Run();
     return 0;
 }
