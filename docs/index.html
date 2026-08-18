@@ -1408,6 +1408,12 @@
         let saveToastTimer = null;
         let savePendingTimer = null;
 
+        // Firmware before the SAVED reply existed never confirms a save, and most cards in
+        // the wild run it. Only treat silence as a failure once this device has proved it
+        // can confirm - otherwise a perfectly good save on an older card would report an
+        // error. Set true the first time a SAVED arrives.
+        let deviceConfirmsSaves = false;
+
         function showToast(text, cls, holdMs) {
             clearTimeout(saveToastTimer);
             saveToast.textContent = text;
@@ -1417,13 +1423,19 @@
             }
         }
 
-        // Call when a save-triggering command has been sent. Leaves "Saving" up with no
-        // timeout, so a device that never confirms shows a failure rather than a success.
+        // Call when a save-triggering command has been sent.
         function expectSave() {
             showToast("Saving", null, 0);
             clearTimeout(savePendingTimer);
             savePendingTimer = setTimeout(() => {
-                showToast("No confirmation from device", "fail", 4000);
+                if (deviceConfirmsSaves) {
+                    // This device has confirmed before, so silence now is a real failure.
+                    showToast("No confirmation from device", "fail", 4000);
+                } else {
+                    // Older firmware: the save almost certainly worked, we just cannot
+                    // prove it. Say what we actually know rather than crying wolf.
+                    showToast("Sent to device", "ok", 2500);
+                }
             }, 5000);
         }
 
@@ -1479,6 +1491,7 @@
                     document.getElementById('clk-div-ratio').value = String(val);
                 }
             } else if (line === "SAVED") {
+                deviceConfirmsSaves = true;
                 clearTimeout(savePendingTimer);
                 showToast("Saved to device", "ok", 2500);
             } else if (line.startsWith("ERR ")) {
@@ -1491,17 +1504,25 @@
             }
         }
 
-        // Commands are queued so writes go out in order, one at a time.
+        // Commands are queued and spaced, one at a time.
         //
-        // These used to be spaced 100ms apart to dodge a firmware bug: every printf on
-        // Core 1 called tud_task() while USBCTRL_IRQ ran TinyUSB on Core 0, and driving
-        // TinyUSB from two cores wedged the CDC endpoint permanently. That is fixed in
-        // firmware - the USB interrupt now lives on Core 1 with everything else that
-        // touches TinyUSB - so the artificial delay is gone. Verified with 40 unpaced
-        // 7-command bursts and 8 interleaved flash saves, no failures.
+        // The spacing is precautionary, for cards still on older firmware. Those builds
+        // drive TinyUSB from both cores - every printf on Core 1 calls tud_task() while
+        // USBCTRL_IRQ runs the device driver on Core 0 - and losing that race wedges the
+        // CDC endpoint permanently, so the module goes silent until it is replugged.
         //
-        // The queue itself stays: it keeps ordering explicit and writes serialised.
-                const cmdQueue = [];
+        // Be accurate about the evidence: the released firmware did NOT reproduce this in
+        // testing (40 unpaced 7-command bursts plus 8 saves, no failures). The wedge only
+        // reproduced readily on builds that raised DMA_IRQ_0 to priority 0, which appears
+        // to widen the race by preempting the USB handler mid-flight. So the race is real
+        // and architectural, but latent in released firmware. The spacing is kept because
+        // the failure mode is severe and needs a physical replug, and ~700ms once per
+        // connect is a cheap hedge - not because it was measured to be necessary.
+        //
+        // Current firmware fixes the race properly (USB lives on Core 1) and does not need
+        // this at all.
+        const CMD_GAP_MS = 100;
+        const cmdQueue = [];
         let cmdDraining = false;
 
         async function sendCommand(cmd) {
@@ -1515,6 +1536,9 @@
                     const next = cmdQueue.shift();
                     if (!writer) break;
                     await writer.write(encoder.encode(next));
+                    if (cmdQueue.length) {
+                        await new Promise(r => setTimeout(r, CMD_GAP_MS));
+                    }
                 }
             } catch (e) {
                 // Write failed — device is gone; surface the lost connection
